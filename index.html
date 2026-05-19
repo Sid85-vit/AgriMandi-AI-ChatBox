@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agri Mandi Chatbot</title>
+<style>
+  h2.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: sans-serif; background-color: #f9f9f9; padding: 20px;}
+
+  :root {
+    --color-text-primary: #333;
+    --color-text-secondary: #666;
+    --color-text-tertiary: #999;
+    --color-text-success: #2e7d32;
+    --color-text-warning: #ed6c02;
+    --color-text-info: #0288d1;
+    --color-background-primary: #fff;
+    --color-background-secondary: #f5f5f5;
+    --color-background-success: #e8f5e9;
+    --color-background-warning: #fff3e0;
+    --color-background-info: #e1f5fe;
+    --color-border-secondary: #e0e0e0;
+    --color-border-tertiary: #eee;
+    --border-radius-md: 8px;
+    --border-radius-lg: 12px;
+  }
+
+  .app { display: flex; flex-direction: column; gap: 16px; max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);}
+
+  .top-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .logo { font-size: 18px; font-weight: 600; color: var(--color-text-primary); display: flex; align-items: center; gap: 8px; }
+  .badge { font-size: 12px; padding: 4px 10px; border-radius: 20px; background: var(--color-background-success); color: var(--color-text-success); font-weight: 500; }
+  .badge.warn { background: var(--color-background-warning); color: var(--color-text-warning); }
+
+  .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+  .stat-card { background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 12px 14px; text-align: center;}
+  .stat-card .lbl { font-size: 11px; color: var(--color-text-secondary); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.4px; }
+  .stat-card .val { font-size: 20px; font-weight: 600; color: var(--color-text-primary); }
+  .stat-card .val.green { color: var(--color-text-success); }
+  .stat-card .val.amber { color: var(--color-text-warning); }
+
+  .chat-box { border: 1px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); background: var(--color-background-primary); overflow: hidden; }
+  .chat-messages { height: 400px; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { display: flex; gap: 10px; align-items: flex-start; }
+  .msg.user { flex-direction: row-reverse; }
+  .msg-avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; flex-shrink: 0; }
+  .msg-avatar.bot { background: var(--color-background-success); color: var(--color-text-success); }
+  .msg-avatar.user { background: var(--color-background-info); color: var(--color-text-info); }
+  .msg-bubble { max-width: 80%; padding: 12px 16px; border-radius: 14px; font-size: 14px; line-height: 1.5; }
+  .msg.bot .msg-bubble { background: var(--color-background-secondary); color: var(--color-text-primary); border-bottom-left-radius: 4px; }
+  .msg.user .msg-bubble { background: var(--color-background-info); color: var(--color-text-info); border-bottom-right-radius: 4px; }
+
+  .typing-dots { display: flex; gap: 4px; align-items: center; padding: 6px 4px; }
+  .typing-dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--color-text-tertiary); animation: bounce 1s infinite; }
+  .typing-dots span:nth-child(2) { animation-delay: 0.15s; }
+  .typing-dots span:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes bounce { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-6px)} }
+
+  .chat-input-row { border-top: 1px solid var(--color-border-tertiary); display: flex; }
+  .chat-input-row input { flex: 1; border: none; padding: 16px; font-size: 14px; outline: none; }
+  .chat-input-row button { padding: 0 20px; border: none; border-left: 1px solid var(--color-border-tertiary); background: transparent; cursor: pointer; color: var(--color-text-success); font-weight: bold; transition: background 0.1s; }
+  .chat-input-row button:hover { background: var(--color-background-secondary); }
+
+  .quick-btns { display: flex; gap: 8px; flex-wrap: wrap; padding: 12px 16px; border-top: 1px solid var(--color-border-tertiary); background: var(--color-background-secondary); }
+  .qbtn { font-size: 12px; padding: 6px 12px; border-radius: 20px; border: 1px solid var(--color-border-secondary); background: white; cursor: pointer; transition: 0.2s; }
+  .qbtn:hover { background: var(--color-text-success); color: white; border-color: var(--color-text-success); }
+  
+  .privacy-note { font-size: 12px; color: var(--color-text-tertiary); text-align: center; margin-top: 10px;}
+</style>
+</head>
+<body>
+
+<h2 class="sr-only">Agmarknet commodity prediction chatbot</h2>
+
+<div class="app" id="app">
+  <div class="top-bar">
+    <div class="logo">🌱 Agri Mandi Chatbot</div>
+    <span class="badge warn" id="data-status">Waiting for local server...</span>
+  </div>
+
+  <div class="stats-row" id="stats-row" style="display:none"></div>
+
+  <div class="chat-box">
+    <div class="chat-messages" id="chat-messages">
+      <div class="msg bot">
+        <div class="msg-avatar bot">🌱</div>
+        <div class="msg-bubble">Hello! I'm your Agri Mandi assistant. Connecting to your local Python database now...</div>
+      </div>
+    </div>
+    <div class="quick-btns" id="quick-btns">
+      <button class="qbtn" onclick="askQuestion('Which state and market has the highest price commodity today?')">Highest price today ↗</button>
+      <button class="qbtn" onclick="askQuestion('Give me a detailed breakdown of Mango and Cauliflower prices across states.')">State price comparisons ↗</button>
+      <button class="qbtn" onclick="askQuestion('Show me the prices of all items registered in Kerala.')">Kerala Mandi Prices ↗</button>
+    </div>
+    <div class="chat-input-row">
+      <input id="chat-input" type="text" placeholder="Ask about commodities, prices, predictions…" onkeydown="if(event.key==='Enter')sendMsg()" />
+      <button onclick="sendMsg()" id="send-btn">SEND</button>
+    </div>
+  </div>
+
+  <div class="privacy-note">
+    🔒 Your data is processed locally. Only your question + a data summary is sent to local Ollama.
+  </div>
+</div>
+
+<script>
+let commodityData = [];
+let chatHistory = [];
+
+window.onload = async function() {
+    addBotMsg("Connecting to local database...", false, "system-msg");
+    try {
+        const response = await fetch('http://127.0.0.1:8000/api/data');
+        const data = await response.json();
+        
+        if (data.error) {
+            addBotMsg("No local data found. Generating initial dataset...", false, "system-msg");
+            await fetch('http://127.0.0.1:8000/api/scrape', { method: 'POST' });
+            
+            const newResponse = await fetch('http://127.0.0.1:8000/api/data');
+            commodityData = await newResponse.json();
+        } else {
+            commodityData = data;
+        }
+        
+        onDataLoaded("Local Database (Python)");
+        
+    } catch(err) {
+        addBotMsg("⚠️ Could not connect to the Python backend. Make sure your command prompt window running `python server.py` is open.");
+    }
+};
+
+function onDataLoaded(source) {
+    document.getElementById('data-status').textContent = `${commodityData.length} records loaded`;
+    document.getElementById('data-status').className = 'badge';
+    renderStats();
+    document.querySelectorAll('.system-msg').forEach(e => e.remove());
+    addBotMsg(`✅ Dataset loaded automatically from Government API. I have ${commodityData.length} live records ready. What would you like to analyze today?`);
+}
+
+function renderStats() {
+    const row = document.getElementById('stats-row');
+    row.style.display = 'grid';
+    const commodities = [...new Set(commodityData.map(r => r.Commodity||r.commodity||''))].filter(Boolean);
+    const markets = [...new Set(commodityData.map(r => r.Market||r.market||''))].filter(Boolean);
+    const prices = commodityData.map(r => parseFloat(r['Modal_x0020_Price']||r.modal_price||r.Modal_Price||0)).filter(x=>x>0);
+    const avgPrice = prices.length ? Math.round(prices.reduce((a,b)=>a+b,0)/prices.length) : 0;
+    row.innerHTML = `
+        <div class="stat-card"><div class="lbl">Records</div><div class="val">${commodityData.length.toLocaleString()}</div></div>
+        <div class="stat-card"><div class="lbl">Commodities</div><div class="val green">${commodities.length}</div></div>
+        <div class="stat-card"><div class="lbl">Markets</div><div class="val amber">${markets.length}</div></div>
+        <div class="stat-card"><div class="lbl">Avg Price</div><div class="val">₹${avgPrice}</div></div>
+    `;
+}
+
+// FIX 1: REWRITTEN TO GENERATE A CLEAN STRIP OF TRUE GEOGRAPHIC ROWS FOR THE SMALL LOCAL AI MODEL
+function buildDataSummary(userQuery) {
+    if(!commodityData.length) return 'No data loaded.';
+    const queryLower = userQuery.toLowerCase();
+    
+    // Dynamically filter down database to stay within local LLM text context limit windows
+    let filteredData = commodityData.filter(r => {
+        const state = (r.State || r.state || '').toLowerCase();
+        const market = (r.Market || r.market || '').toLowerCase();
+        const commodity = (r.Commodity || r.commodity || '').toLowerCase();
+        return queryLower.includes(state) || queryLower.includes(market) || queryLower.includes(commodity);
+    });
+    
+    // If it's a broad macro request, feed the top 40 items to prevent parameter confusion
+    if (filteredData.length === 0) {
+        filteredData = commodityData.slice(0, 45);
+    } else {
+        filteredData = filteredData.slice(0, 45);
+    }
+    
+    // Reconstruct raw nested strings into highly structured rows that Phi-3 recognizes natively
+    return filteredData.map(r => {
+        const state = r.State || r.state || 'Unknown';
+        const market = r.Market || r.market || 'Unknown';
+        const commodity = r.Commodity || r.commodity || 'Unknown';
+        const price = r['Modal_x0020_Price'] || r.modal_price || r.Modal_Price || '0';
+        const date = r.Arrival_Date || r.arrival_date || 'Unknown';
+        return `- State: ${state} | Market: ${market} | Commodity: ${commodity} | Modal Price: Rs. ${price} | Date: ${date}`;
+    }).join('\n');
+}
+
+function addBotMsg(text, isTyping=false, extraClass="") {
+    const msgs = document.getElementById('chat-messages');
+    const div = document.createElement('div');
+    div.className = `msg bot ${extraClass}`;
+    if(isTyping) {
+        div.id = 'typing-indicator';
+        div.innerHTML = `<div class="msg-avatar bot">🌱</div><div class="msg-bubble"><div class="typing-dots"><span></span><span></span><span></span></div></div>`;
+    } else {
+        const formatted = text.replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>');
+        div.innerHTML = `<div class="msg-avatar bot">🌱</div><div class="msg-bubble">${formatted}</div>`;
+    }
+    msgs.appendChild(div);
+    msgs.scrollTop = msgs.scrollHeight;
+    return div;
+}
+
+function addUserMsg(text) {
+    const msgs = document.getElementById('chat-messages');
+    const div = document.createElement('div');
+    div.className = 'msg user';
+    div.innerHTML = `<div class="msg-avatar user">👤</div><div class="msg-bubble">${text}</div>`;
+    msgs.appendChild(div);
+    msgs.scrollTop = msgs.scrollHeight;
+}
+
+function askQuestion(q) {
+    document.getElementById('chat-input').value = q;
+    sendMsg();
+}
+
+async function sendMsg() {
+    const input = document.getElementById('chat-input');
+    const text = input.value.trim();
+    if(!text) return;
+    input.value = '';
+    document.getElementById('send-btn').disabled = true;
+    addUserMsg(text);
+
+    const dataSummary = buildDataSummary(text);
+    
+    // FIX 2: TIGHTENED ARGUMENTS FORCING STRICT CONTEXT COMPLIANCE
+    const strictSystemPrompt = `You are a strict real-time data calculator and expert analyst for Indian Mandi agricultural prices.
+
+Rules:
+1. Base your answer ONLY on the explicit data lines listed under CURRENT REAL-TIME MANDI MARKET DATA.
+2. Do not use any outside knowledge, pre-trained assumptions, or invent facts about states not present.
+3. Compare prices numerically. If asked for the highest price, evaluate the "Modal Price" numbers directly.
+4. Keep answers clean, direct, informative, and formatted using bold markdown for keys.
+
+CURRENT REAL-TIME MANDI MARKET DATA:
+${dataSummary}`;
+
+    chatHistory.push({ role: 'user', content: text });
+    const typingDiv = addBotMsg('', true);
+
+    try {
+        // FIX 3: STRIPPED DEAD BODY ATTRIBUTES AND SENT SYSTEM PACKAGES CLEANLY WITHIN THE MESSAGE INTERFACE
+        const res = await fetch('http://localhost:11434/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: 'phi3',
+                stream: false,
+                messages: [
+                    { role: 'system', content: strictSystemPrompt },
+                    ...chatHistory
+                ] 
+            })
+        });
+        const data = await res.json();
+        const reply = data.message?.content || 'No response.';
+        chatHistory.push({ role: 'assistant', content: reply });
+        typingDiv.remove();
+        addBotMsg(reply);
+    } catch(err) {
+        typingDiv.remove();
+        addBotMsg('Error connecting to Ollama. Make sure Ollama is running in the background.');
+    }
+    document.getElementById('send-btn').disabled = false;
+}
+</script>
+</body>
+</html>
