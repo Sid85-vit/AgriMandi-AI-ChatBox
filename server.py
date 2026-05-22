@@ -81,14 +81,28 @@ def chat_with_data(request: ChatRequest):
             market_data = json.load(file)
 
     print(f"DEBUG: Total records in memory: {len(market_data)}")
-    
-    query_lower = request.message.lower()
-    relevant = [row for row in market_data if any(val in query_lower for val in [str(row.get(k, "")).lower() for k in ["State", "Commodity", "Market"]])]
 
-    print(f"DEBUG: Matches found after filtering: {len(relevant)}")
+    query_lower = request.message.lower().strip()
+    relevant_records = []
     
-    # Use top 40 if no match, else top 80 of relevant
-    records_to_send = (relevant if relevant else market_data)[:80]
+    # Scan the database with more robust matching
+    for row in market_data:
+        # We use .strip() to clean up hidden spaces in the government data
+        state = str(row.get("State", "")).strip().lower()
+        commodity = str(row.get("Commodity", "")).strip().lower()
+        market = str(row.get("Market", "")).strip().lower()
+        
+        # Check if the query contains the state OR the commodity
+        if query_lower in state or query_lower in commodity or query_lower in market:
+            relevant_records.append(row)
+            
+    # CRITICAL CHANGE: If no matches are found, DO NOT send random data.
+    # Send an empty list so the AI knows we have no relevant data.
+    if not relevant_records:
+        return {"reply": "I couldn't find any data for that specific request. Try asking about a specific state or commodity."}
+        
+    # Cap the maximum allowed records to 80 to guarantee we stay under Groq limits
+    relevant_records = relevant_records[:80]    
     flattened_data = json.dumps(records_to_send, separators=(',', ':'))
     
     system_instruction = (
