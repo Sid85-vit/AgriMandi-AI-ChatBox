@@ -40,6 +40,11 @@ def fetch_live_government_data():
     try:
         response = requests.get(api_url, headers=headers, timeout=30)
         data = response.json()
+
+        print(f"DEBUG: Raw API Response Keys: {data.keys()}")
+        if "records" not in data:
+            print(f"DEBUG: Full API response: {data}")
+            
         raw_records = data.get("records", [])
         
         mapped_records = []
