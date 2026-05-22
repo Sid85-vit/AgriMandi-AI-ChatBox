@@ -119,6 +119,7 @@ def chat_with_data(request: ChatRequest):
         )
         return {"reply": response.text}
     except Exception as e:
+        print(f"🚨 GOOGLE SDK CRASHED: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
