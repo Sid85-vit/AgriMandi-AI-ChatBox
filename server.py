@@ -151,10 +151,6 @@ def chat_with_data(request: ChatRequest):
     except Exception as e:
         print(f"🚨 GROQ SDK CRASHED: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-        
-    except Exception as e:
-        print(f"🚨 GROQ SDK CRASHED: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
