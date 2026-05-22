@@ -31,7 +31,7 @@ class ChatRequest(BaseModel):
 def fetch_live_government_data():
     """Hits the official data.gov.in API with a browser disguise."""
     API_KEY = os.getenv("GOV_API_KEY")
-    RESOURCE_ID = "35985678-0d79-46b4-9ed6-6f13308a1d24"    
+    RESOURCE_ID = "9ef84268-d588-465a-a308-a864a43d0070"    
 
     api_url = f"https://api.data.gov.in/resource/{RESOURCE_ID}?api-key={API_KEY}&format=json&limit=5000"    
 
