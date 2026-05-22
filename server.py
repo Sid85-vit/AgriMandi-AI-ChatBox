@@ -135,7 +135,7 @@ def chat_with_data(request: ChatRequest):
     # 4. Call the cloud API securely from the server
     try:
         response = client.models.generate_content(
-            model="gemini-2.0-flash", # Assuming you are using the latest version
+            model="gemini-2.5-flash-lite", # Assuming you are using the latest version
             contents=system_instruction
         )
         return {"reply": response.text}
