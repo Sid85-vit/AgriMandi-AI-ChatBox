@@ -112,14 +112,14 @@ let commodityData = [];
 window.onload = async function() {
     addBotMsg("Connecting to server database...", false, "system-msg");
     try {
-        const response = await fetch('http://127.0.0.1:8000/api/data');
+        const response = await fetch('https://agrimandi-ai-chatbox.onrender.com/api/data');
         const data = await response.json();
         
         if (data.error) {
             addBotMsg("No database cache found. Requesting initial syncing routine...", false, "system-msg");
-            await fetch('http://127.0.0.1:8000/api/scrape', { method: 'POST' });
+            await fetch('https://agrimandi-ai-chatbox.onrender.com/api/scrape', { method: 'POST' });
             
-            const newResponse = await fetch('http://127.0.0.1:8000/api/data');
+            const newResponse = await fetch('https://agrimandi-ai-chatbox.onrender.com/api/data');
             commodityData = await newResponse.json();
         } else {
             commodityData = data;
@@ -198,7 +198,7 @@ async function sendMsg() {
 
     try {
         // Pointing directly to your Python backend wrapper now instead of local Ollama ports
-        const res = await fetch('http://127.0.0.1:8000/api/chat', {
+        const res = await fetch('https://agrimandi-ai-chatbox.onrender.com/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ message: text }) 
