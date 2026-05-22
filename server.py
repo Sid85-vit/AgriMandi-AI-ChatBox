@@ -5,6 +5,9 @@ import json
 import os
 import requests
 from dotenv import load_dotenv
+from groq import Groq
+
+client = Groq()
 
 # NEW: Import the Google GenAI SDK
 from google import genai
@@ -87,9 +90,9 @@ def force_scrape():
 # NEW: The secure Chat Endpoint
 @app.post("/api/chat")
 def chat_with_data(request: ChatRequest):
-    """Smart-filters data to save Gemini API tokens, then asks for analysis."""
+    """Smart-filters data to save Groq API tokens, then asks for analysis."""
     
-    # 1. Load the historical data
+    # 1. Load the data
     market_data = []
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r") as file:
@@ -99,7 +102,7 @@ def chat_with_data(request: ChatRequest):
     query_lower = request.message.lower()
     relevant_records = []
     
-    # Scan the 5,000 records and only keep rows mentioned in the user's prompt
+    # Scan the database and only keep rows mentioned in the user's prompt
     for row in market_data:
         state = str(row.get("State", "")).lower()
         commodity = str(row.get("Commodity", "")).lower()
@@ -108,13 +111,12 @@ def chat_with_data(request: ChatRequest):
         if state in query_lower or commodity in query_lower or market in query_lower:
             relevant_records.append(row)
             
-    # If the user asks a broad question and no specific filters hit, 
-    # just grab the top 50 records so we don't send the whole database
+    # If the user asks a broad question, grab the top 40 records to prevent token overflow
     if not relevant_records:
-        relevant_records = market_data[:50]
+        relevant_records = market_data[:40]
         
-    # Cap the maximum allowed records to 100 to guarantee we stay under API limits
-    relevant_records = relevant_records[:100]
+    # Cap the absolute maximum allowed records to 80 to guarantee we stay under Groq limits
+    relevant_records = relevant_records[:80]
             
     # Flatten ONLY the filtered, tiny dataset
     flattened_data = json.dumps(relevant_records, separators=(',', ':'))
@@ -128,19 +130,23 @@ def chat_with_data(request: ChatRequest):
         "1. Never dump raw lists of dates and prices.\n"
         "2. If asked for prices across multiple dates, summarize the Maximum, Minimum, and Average.\n"
         "3. Use clean Markdown tables to display comparisons.\n\n"
-        f"DATA: {flattened_data}\n\n"
-        f"USER QUERY: {request.message}"
+        f"DATA: {flattened_data}"
     )
 
-    # 4. Call the cloud API securely from the server
+    # 4. Call Groq
     try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash-lite", # Assuming you are using the latest version
-            contents=system_instruction
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": request.message}
+            ],
+            temperature=0.2 
         )
-        return {"reply": response.text}
+        return {"reply": response.choices[0].message.content}
+        
     except Exception as e:
-        print(f"🚨 GOOGLE SDK CRASHED: {str(e)}")
+        print(f"🚨 GROQ SDK CRASHED: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
