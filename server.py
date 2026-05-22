@@ -133,15 +133,14 @@ def chat_with_data(request: ChatRequest):
         f"DATA: {flattened_data}"
     )
 
-    # 4. Call Groq
+# 4. Universal Groq Call
     try:
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": system_instruction},
                 {"role": "user", "content": request.message}
-            ],
-            temperature=0.2 
+            ]
         )
         return {"reply": response.choices[0].message.content}
         
