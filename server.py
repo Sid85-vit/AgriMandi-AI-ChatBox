@@ -101,8 +101,12 @@ def chat_with_data(request: ChatRequest):
     # 2. Build the strict context prompt
     system_instruction = (
         "You are Agri Mandi Bot. You track Indian agricultural commodity prices. "
-        "Answer the user's query based strictly on the following live market data. "
+        "Answer the user's query based strictly on the following market data. "
         "Do not invent prices. If the data is not in the JSON below, say you don't know.\n\n"
+        "FORMATTING RULES:\n"
+        "1. Never dump raw lists of dates and prices.\n"
+        "2. If asked for prices of a commodity across multiple dates or markets, summarize the data. Provide the Maximum, Minimum, and Average prices instead of listing every row.\n"
+        "3. Use clean Markdown tables to display comparisons if there are more than 3 data points.\n\n"
         f"DATA: {flattened_data}\n\n"
         f"USER QUERY: {request.message}"
     )
