@@ -90,64 +90,48 @@ def force_scrape():
 # NEW: The secure Chat Endpoint
 @app.post("/api/chat")
 def chat_with_data(request: ChatRequest):
-    """Smart-filters data to save Groq API tokens, then asks for analysis."""
-    
-    # 1. Load the data
+    # 1. Load data
     market_data = []
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r") as file:
             market_data = json.load(file)
             
-    # 2. THE TOKEN SAVER: Python Pre-Filtering
+    # 2. Filtering logic (Token Saver)
     query_lower = request.message.lower()
-    relevant_records = []
+    relevant_records = [row for row in market_data if any(val in query_lower for val in [str(row.get(k, "")).lower() for k in ["State", "Commodity", "Market"]])]
     
-    # Scan the database and only keep rows mentioned in the user's prompt
-    for row in market_data:
-        state = str(row.get("State", "")).lower()
-        commodity = str(row.get("Commodity", "")).lower()
-        market = str(row.get("Market", "")).lower()
-        
-        if state in query_lower or commodity in query_lower or market in query_lower:
-            relevant_records.append(row)
-            
-    # If the user asks a broad question, grab the top 40 records to prevent token overflow
     if not relevant_records:
         relevant_records = market_data[:40]
-        
-    # Cap the absolute maximum allowed records to 80 to guarantee we stay under Groq limits
     relevant_records = relevant_records[:80]
-            
-    # Flatten ONLY the filtered, tiny dataset
     flattened_data = json.dumps(relevant_records, separators=(',', ':'))
     
-    # 3. Build the strict context prompt
+    # 3. System prompt
     system_instruction = (
-        "You are Agri Mandi Bot. You track Indian agricultural commodity prices. "
-        "Answer the user's query based strictly on the following market data. "
-        "Do not invent prices. If the data is not in the JSON below, say you don't know.\n\n"
-        "FORMATTING RULES:\n"
-        "1. Never dump raw lists of dates and prices.\n"
-        "2. If asked for prices across multiple dates, summarize the Maximum, Minimum, and Average.\n"
-        "3. Use clean Markdown tables to display comparisons.\n\n"
-        f"DATA: {flattened_data}"
+        "You are Agri Mandi Bot. Summarize price data: Min, Max, Avg. Use Markdown tables."
+        f"\n\nDATA: {flattened_data}\n\nUSER QUERY: {request.message}"
     )
 
-    # 4. Call Groq
+    # 4. Corrected Groq Call
     try:
-        # Use the explicit path: client.chat.completions.create
+        # Debugging: check what the client actually has
+        # print(f"DEBUG: Client methods: {dir(client)}") 
+        
+        # Standard SDK path:
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": system_instruction},
                 {"role": "user", "content": request.message}
             ],
-            temperature=0.2 
+            temperature=0.2
         )
-        
-        # Access the response correctly
         return {"reply": response.choices[0].message.content}
         
+    except AttributeError as ae:
+        # If it fails here, the logs will show exactly what attribute was missing
+        err_msg = f"AttributeError: {str(ae)}. Available attributes: {dir(client)}"
+        print(f"🚨 GROQ SDK CRASHED: {err_msg}")
+        raise HTTPException(status_code=500, detail=err_msg)
     except Exception as e:
         print(f"🚨 GROQ SDK CRASHED: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
