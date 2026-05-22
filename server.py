@@ -75,34 +75,37 @@ def get_latest_data():
 
 @app.post("/api/chat")
 def chat_with_data(request: ChatRequest):
+    # 1. Load data
     market_data = []
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r") as file:
             market_data = json.load(file)
-
-    print(f"DEBUG: Total records in memory: {len(market_data)}")
-
+            
     query_lower = request.message.lower().strip()
     relevant_records = []
     
-    # Scan the database with more robust matching
+    # 2. Corrected Filtering: Does the STATE/COMMODITY exist in the QUERY?
     for row in market_data:
-        # We use .strip() to clean up hidden spaces in the government data
         state = str(row.get("State", "")).strip().lower()
         commodity = str(row.get("Commodity", "")).strip().lower()
         market = str(row.get("Market", "")).strip().lower()
         
-        # Check if the query contains the state OR the commodity
-        if query_lower in state or query_lower in commodity or query_lower in market:
+        # Check if the data field is inside the user's question
+        if state in query_lower or commodity in query_lower or market in query_lower:
             relevant_records.append(row)
             
-    # CRITICAL CHANGE: If no matches are found, DO NOT send random data.
-    # Send an empty list so the AI knows we have no relevant data.
+    # 3. Handle Broad Queries
+    # If the user asks a question like "Which state has highest price", 
+    # they aren't looking for a specific state, so send the whole dataset.
     if not relevant_records:
-        return {"reply": "I couldn't find any data for that specific request. Try asking about a specific state or commodity."}
+        # If the query is broad (less than 5 words), assume they want general data
+        if len(query_lower.split()) < 7: 
+            records_to_send = market_data[:100] # Send first 100 to keep it fast
+        else:
+            return {"reply": "I couldn't find specific data for that. Try asking about a specific state (e.g., Kerala) or commodity (e.g., Rice)."}
+    else:
+        records_to_send = relevant_records[:80]
         
-    # Cap the maximum allowed records to 80 to guarantee we stay under Groq limits
-    relevant_records = relevant_records[:80]    
     flattened_data = json.dumps(records_to_send, separators=(',', ':'))
     
     system_instruction = (
