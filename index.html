@@ -53,7 +53,7 @@
   .msg.user .msg-bubble { background: var(--color-background-info); color: var(--color-text-info); border-bottom-right-radius: 4px; }
 
   .typing-dots { display: flex; gap: 4px; align-items: center; padding: 6px 4px; }
-  .typing-dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--color-text-tertiary); animation: bounce 1s infinite; }
+  .typing-dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--text-tertiary); animation: bounce 1s infinite; }
   .typing-dots span:nth-child(2) { animation-delay: 0.15s; }
   .typing-dots span:nth-child(3) { animation-delay: 0.3s; }
   @keyframes bounce { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-6px)} }
@@ -77,7 +77,7 @@
 <div class="app" id="app">
   <div class="top-bar">
     <div class="logo">🌱 Agri Mandi Chatbot</div>
-    <span class="badge warn" id="data-status">Waiting for local server...</span>
+    <span class="badge warn" id="data-status">Waiting for cloud server...</span>
   </div>
 
   <div class="stats-row" id="stats-row" style="display:none"></div>
@@ -86,7 +86,7 @@
     <div class="chat-messages" id="chat-messages">
       <div class="msg bot">
         <div class="msg-avatar bot">🌱</div>
-        <div class="msg-bubble">Hello! I'm your Agri Mandi assistant. Connecting to your local Python database now...</div>
+        <div class="msg-bubble">Hello! I'm your Agri Mandi assistant. Connecting to your cloud-powered server database now...</div>
       </div>
     </div>
     <div class="quick-btns" id="quick-btns">
@@ -100,23 +100,23 @@
     </div>
   </div>
 
+  <!-- UPDATED: Refreshed privacy disclaimer to match cloud inference architecture -->
   <div class="privacy-note">
-    🔒 Your data is processed locally. Only your question + a data summary is sent to local Ollama.
+    🔒 Data sourced directly from data.gov.in. AI analysis powered securely via cloud backend proxy.
   </div>
 </div>
 
 <script>
 let commodityData = [];
-let chatHistory = [];
 
 window.onload = async function() {
-    addBotMsg("Connecting to local database...", false, "system-msg");
+    addBotMsg("Connecting to server database...", false, "system-msg");
     try {
         const response = await fetch('http://127.0.0.1:8000/api/data');
         const data = await response.json();
         
         if (data.error) {
-            addBotMsg("No local data found. Generating initial dataset...", false, "system-msg");
+            addBotMsg("No database cache found. Requesting initial syncing routine...", false, "system-msg");
             await fetch('http://127.0.0.1:8000/api/scrape', { method: 'POST' });
             
             const newResponse = await fetch('http://127.0.0.1:8000/api/data');
@@ -125,19 +125,19 @@ window.onload = async function() {
             commodityData = data;
         }
         
-        onDataLoaded("Local Database (Python)");
+        onDataLoaded();
         
     } catch(err) {
-        addBotMsg("⚠️ Could not connect to the Python backend. Make sure your command prompt window running `python server.py` is open.");
+        addBotMsg("⚠️ Could not connect to the backend server. Make sure your Python server is running (`python server.py`).");
     }
 };
 
-function onDataLoaded(source) {
+function onDataLoaded() {
     document.getElementById('data-status').textContent = `${commodityData.length} records loaded`;
     document.getElementById('data-status').className = 'badge';
     renderStats();
     document.querySelectorAll('.system-msg').forEach(e => e.remove());
-    addBotMsg(`✅ Dataset loaded automatically from Government API. I have ${commodityData.length} live records ready. What would you like to analyze today?`);
+    addBotMsg(`✅ Dataset loaded successfully. I have ${commodityData.length} live records cached on the server and verified. What would you like to analyze today?`);
 }
 
 function renderStats() {
@@ -153,37 +153,6 @@ function renderStats() {
         <div class="stat-card"><div class="lbl">Markets</div><div class="val amber">${markets.length}</div></div>
         <div class="stat-card"><div class="lbl">Avg Price</div><div class="val">₹${avgPrice}</div></div>
     `;
-}
-
-// FIX 1: REWRITTEN TO GENERATE A CLEAN STRIP OF TRUE GEOGRAPHIC ROWS FOR THE SMALL LOCAL AI MODEL
-function buildDataSummary(userQuery) {
-    if(!commodityData.length) return 'No data loaded.';
-    const queryLower = userQuery.toLowerCase();
-    
-    // Dynamically filter down database to stay within local LLM text context limit windows
-    let filteredData = commodityData.filter(r => {
-        const state = (r.State || r.state || '').toLowerCase();
-        const market = (r.Market || r.market || '').toLowerCase();
-        const commodity = (r.Commodity || r.commodity || '').toLowerCase();
-        return queryLower.includes(state) || queryLower.includes(market) || queryLower.includes(commodity);
-    });
-    
-    // If it's a broad macro request, feed the top 40 items to prevent parameter confusion
-    if (filteredData.length === 0) {
-        filteredData = commodityData.slice(0, 45);
-    } else {
-        filteredData = filteredData.slice(0, 45);
-    }
-    
-    // Reconstruct raw nested strings into highly structured rows that Phi-3 recognizes natively
-    return filteredData.map(r => {
-        const state = r.State || r.state || 'Unknown';
-        const market = r.Market || r.market || 'Unknown';
-        const commodity = r.Commodity || r.commodity || 'Unknown';
-        const price = r['Modal_x0020_Price'] || r.modal_price || r.Modal_Price || '0';
-        const date = r.Arrival_Date || r.arrival_date || 'Unknown';
-        return `- State: ${state} | Market: ${market} | Commodity: ${commodity} | Modal Price: Rs. ${price} | Date: ${date}`;
-    }).join('\n');
 }
 
 function addBotMsg(text, isTyping=false, extraClass="") {
@@ -216,6 +185,7 @@ function askQuestion(q) {
     sendMsg();
 }
 
+// CHANGED: Completely streamlined to send only the user's plain question to your secure proxy server endpoint.
 async function sendMsg() {
     const input = document.getElementById('chat-input');
     const text = input.value.trim();
@@ -224,45 +194,26 @@ async function sendMsg() {
     document.getElementById('send-btn').disabled = true;
     addUserMsg(text);
 
-    const dataSummary = buildDataSummary(text);
-    
-    // FIX 2: TIGHTENED ARGUMENTS FORCING STRICT CONTEXT COMPLIANCE
-    const strictSystemPrompt = `You are a strict real-time data calculator and expert analyst for Indian Mandi agricultural prices.
-
-Rules:
-1. Base your answer ONLY on the explicit data lines listed under CURRENT REAL-TIME MANDI MARKET DATA.
-2. Do not use any outside knowledge, pre-trained assumptions, or invent facts about states not present.
-3. Compare prices numerically. If asked for the highest price, evaluate the "Modal Price" numbers directly.
-4. Keep answers clean, direct, informative, and formatted using bold markdown for keys.
-
-CURRENT REAL-TIME MANDI MARKET DATA:
-${dataSummary}`;
-
-    chatHistory.push({ role: 'user', content: text });
     const typingDiv = addBotMsg('', true);
 
     try {
-        // FIX 3: STRIPPED DEAD BODY ATTRIBUTES AND SENT SYSTEM PACKAGES CLEANLY WITHIN THE MESSAGE INTERFACE
-        const res = await fetch('http://localhost:11434/api/chat', {
+        // Pointing directly to your Python backend wrapper now instead of local Ollama ports
+        const res = await fetch('http://127.0.0.1:8000/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: 'phi3',
-                stream: false,
-                messages: [
-                    { role: 'system', content: strictSystemPrompt },
-                    ...chatHistory
-                ] 
-            })
+            body: JSON.stringify({ message: text }) 
         });
+        
         const data = await res.json();
-        const reply = data.message?.content || 'No response.';
-        chatHistory.push({ role: 'assistant', content: reply });
+        
+        // Parse the payload key 'reply' returned from our custom FastAPI server endpoint
+        const reply = data.reply || 'No response generated.';
+        
         typingDiv.remove();
         addBotMsg(reply);
     } catch(err) {
         typingDiv.remove();
-        addBotMsg('Error connecting to Ollama. Make sure Ollama is running in the background.');
+        addBotMsg('Error communicating with the application server. Make sure server.py is running.');
     }
     document.getElementById('send-btn').disabled = false;
 }
