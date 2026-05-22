@@ -87,34 +87,55 @@ def force_scrape():
 # NEW: The secure Chat Endpoint
 @app.post("/api/chat")
 def chat_with_data(request: ChatRequest):
-    """Takes user message, attaches local data cache, and asks Gemini."""
+    """Smart-filters data to save Gemini API tokens, then asks for analysis."""
     
-    # 1. Load the latest offline data cache
+    # 1. Load the historical data
     market_data = []
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r") as file:
             market_data = json.load(file)
             
-    # Flatten the data to save tokens and prevent model confusion
-    flattened_data = json.dumps(market_data, separators=(',', ':'))
+    # 2. THE TOKEN SAVER: Python Pre-Filtering
+    query_lower = request.message.lower()
+    relevant_records = []
     
-    # 2. Build the strict context prompt
+    # Scan the 5,000 records and only keep rows mentioned in the user's prompt
+    for row in market_data:
+        state = str(row.get("State", "")).lower()
+        commodity = str(row.get("Commodity", "")).lower()
+        market = str(row.get("Market", "")).lower()
+        
+        if state in query_lower or commodity in query_lower or market in query_lower:
+            relevant_records.append(row)
+            
+    # If the user asks a broad question and no specific filters hit, 
+    # just grab the top 50 records so we don't send the whole database
+    if not relevant_records:
+        relevant_records = market_data[:50]
+        
+    # Cap the maximum allowed records to 100 to guarantee we stay under API limits
+    relevant_records = relevant_records[:100]
+            
+    # Flatten ONLY the filtered, tiny dataset
+    flattened_data = json.dumps(relevant_records, separators=(',', ':'))
+    
+    # 3. Build the strict context prompt
     system_instruction = (
         "You are Agri Mandi Bot. You track Indian agricultural commodity prices. "
         "Answer the user's query based strictly on the following market data. "
         "Do not invent prices. If the data is not in the JSON below, say you don't know.\n\n"
         "FORMATTING RULES:\n"
         "1. Never dump raw lists of dates and prices.\n"
-        "2. If asked for prices of a commodity across multiple dates or markets, summarize the data. Provide the Maximum, Minimum, and Average prices instead of listing every row.\n"
-        "3. Use clean Markdown tables to display comparisons if there are more than 3 data points.\n\n"
+        "2. If asked for prices across multiple dates, summarize the Maximum, Minimum, and Average.\n"
+        "3. Use clean Markdown tables to display comparisons.\n\n"
         f"DATA: {flattened_data}\n\n"
         f"USER QUERY: {request.message}"
     )
 
-    # 3. Call the cloud API securely from the server
+    # 4. Call the cloud API securely from the server
     try:
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.0-flash", # Assuming you are using the latest version
             contents=system_instruction
         )
         return {"reply": response.text}
