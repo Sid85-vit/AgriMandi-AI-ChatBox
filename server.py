@@ -74,9 +74,13 @@ def chat_with_data(request: ChatRequest):
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r") as file:
             market_data = json.load(file)
-            
+
+    print(f"DEBUG: Total records in memory: {len(market_data)}")
+    
     query_lower = request.message.lower()
     relevant = [row for row in market_data if any(val in query_lower for val in [str(row.get(k, "")).lower() for k in ["State", "Commodity", "Market"]])]
+
+    print(f"DEBUG: Matches found after filtering: {len(relevant)}")
     
     # Use top 40 if no match, else top 80 of relevant
     records_to_send = (relevant if relevant else market_data)[:80]
