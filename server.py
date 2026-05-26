@@ -81,28 +81,58 @@ def chat_with_data(request: ChatRequest):
         with open(DATA_FILE, "r") as file:
             market_data = json.load(file)
             
+    if not market_data:
+        return {"reply": "The database is currently empty. Please wait for the next data fetch."}
+            
     query_lower = request.message.lower().strip()
     relevant_records = []
     
-    # 2. Corrected Filtering: Does the STATE/COMMODITY exist in the QUERY?
+    # 2. Safer String-Matching Filter
     for row in market_data:
         state = str(row.get("State", "")).strip().lower()
         commodity = str(row.get("Commodity", "")).strip().lower()
         market = str(row.get("Market", "")).strip().lower()
         
-        # Check if the data field is inside the user's question
-        if state in query_lower or commodity in query_lower or market in query_lower:
+        # Added a length check (>2) to prevent empty strings or tiny acronyms from creating false positives
+        if (len(state) > 2 and state in query_lower) or \
+           (len(commodity) > 2 and commodity in query_lower) or \
+           (len(market) > 2 and market in query_lower):
             relevant_records.append(row)
             
-    # 3. Handle Broad Queries
-    # If the user asks a question like "Which state has highest price", 
-    # they aren't looking for a specific state, so send the whole dataset.
+    # 3. Handle Broad Queries & Data Droughts
     if not relevant_records:
-        # If the query is broad (less than 5 words), assume they want general data
-        if len(query_lower.split()) < 7: 
-            records_to_send = market_data[:100] # Send first 100 to keep it fast
+        # Check for superlative global queries (Highest/Top)
+        if any(word in query_lower for word in ["highest", "max", "top", "most expensive"]):
+            # Sort descending by price safely
+            sorted_data = sorted(
+                market_data, 
+                key=lambda x: float(x.get("Modal_Price", 0)) if str(x.get("Modal_Price", 0)).replace('.', '', 1).isdigit() else 0, 
+                reverse=True
+            )
+            records_to_send = sorted_data[:80]
+            
+        # Check for superlative global queries (Lowest/Bottom)
+        elif any(word in query_lower for word in ["lowest", "min", "cheapest", "bottom"]):
+            # Filter out zeroes, then sort ascending
+            valid_prices = [
+                x for x in market_data 
+                if str(x.get("Modal_Price", 0)).replace('.', '', 1).isdigit() and float(x.get("Modal_Price", 0)) > 0
+            ]
+            sorted_data = sorted(valid_prices, key=lambda x: float(x.get("Modal_Price", 0)))
+            records_to_send = sorted_data[:80]
+            
         else:
-            return {"reply": "I couldn't find specific data for that. Try asking about a specific state (e.g., Kerala) or commodity (e.g., Rice)."}
+            # The True "Data Drought" Diagnostic Handler
+            unique_states = list({r.get("State") for r in market_data if r.get("State") and r.get("State") != "Unknown"})
+            unique_commodities = list({r.get("Commodity") for r in market_data if r.get("Commodity") and r.get("Commodity") != "Unknown"})
+            
+            # Dynamically grab up to 3 samples from today's live data
+            sample_states = ", ".join(unique_states[:3]) if unique_states else "various states"
+            sample_comms = ", ".join(unique_commodities[:3]) if unique_commodities else "various commodities"
+            
+            return {
+                "reply": f"I couldn't find data for that specific request in today's batch. However, today's live records currently feature states like **{sample_states}** and commodities like **{sample_comms}**. Could you try asking about one of those?"
+            }
     else:
         records_to_send = relevant_records[:80]
         
