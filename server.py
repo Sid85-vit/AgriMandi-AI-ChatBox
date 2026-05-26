@@ -75,18 +75,33 @@ def get_latest_data():
 
 @app.post("/api/chat")
 def chat_with_data(request: ChatRequest):
-    # 1. Load data
+    # 1. Load data with a self-healing fallback
     market_data = []
     if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r") as file:
-            market_data = json.load(file)
-            
+        try:
+            with open(DATA_FILE, "r") as file:
+                market_data = json.load(file)
+        except json.JSONDecodeError:
+            # Catch edge cases where the file was created but left empty
+            market_data = []
+
+    # THE FIX: If the file is missing or wiped by Render, fetch it on the fly!
     if not market_data:
-        return {"reply": "The database is currently empty. Please wait for the next data fetch."}
+        print("DEBUG: Local file missing. Fetching live data for chat...")
+        market_data = fetch_live_government_data()
+        
+        # Save it immediately so future queries are fast again
+        if market_data:
+            with open(DATA_FILE, "w") as file:
+                json.dump(market_data, file, indent=4)
+
+    # If it is STILL empty after a live fetch, the Gov API itself is down.
+    if not market_data:
+        return {"reply": "The government API is currently unresponsive or returned no data. Please wait a moment and try again."}
             
     query_lower = request.message.lower().strip()
     relevant_records = []
-    
+        
     # 2. Safer String-Matching Filter
     for row in market_data:
         state = str(row.get("State", "")).strip().lower()
