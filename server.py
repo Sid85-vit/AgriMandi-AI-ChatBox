@@ -75,50 +75,78 @@ def get_latest_data():
 
 @app.post("/api/chat")
 def chat_with_data(request: ChatRequest):
-    # 1. Load data with a self-healing fallback
+    # 1. Load data with self-healing fallback
     market_data = []
     if os.path.exists(DATA_FILE):
         try:
             with open(DATA_FILE, "r") as file:
                 market_data = json.load(file)
         except json.JSONDecodeError:
-            # Catch edge cases where the file was created but left empty
             market_data = []
 
-    # THE FIX: If the file is missing or wiped by Render, fetch it on the fly!
     if not market_data:
         print("DEBUG: Local file missing. Fetching live data for chat...")
         market_data = fetch_live_government_data()
-        
-        # Save it immediately so future queries are fast again
         if market_data:
             with open(DATA_FILE, "w") as file:
                 json.dump(market_data, file, indent=4)
 
-    # If it is STILL empty after a live fetch, the Gov API itself is down.
     if not market_data:
-        return {"reply": "The government API is currently unresponsive or returned no data. Please wait a moment and try again."}
+        return {"reply": "The database is currently empty. Please wait for the next data fetch."}
             
     query_lower = request.message.lower().strip()
-    relevant_records = []
+    
+    # 2. Extract unique available entities from today's dataset for cross-referencing
+    all_states = set()
+    all_commodities = set()
+    all_markets = set()
+    for row in market_data:
+        if row.get("State"): all_states.add(str(row["State"]).strip().lower())
+        if row.get("Commodity"): all_commodities.add(str(row["Commodity"]).strip().lower())
+        if row.get("Market"): all_markets.add(str(row["Market"]).strip().lower())
         
-    # 2. Safer String-Matching Filter
+    # Clean out empty strings or tiny anomalies
+    all_states = {s for s in all_states if len(s) > 2 and s != "unknown"}
+    all_commodities = {c for c in all_commodities if len(c) > 2 and c != "unknown"}
+    all_markets = {m for m in all_markets if len(m) > 2 and m != "unknown"}
+    
+    # 3. Smart Entity Extraction: Detect what categories the user is actually targeting
+    matched_states = {s for s in all_states if s in query_lower}
+    matched_commodities = {c for c in all_commodities if c in query_lower}
+    
+    # Advanced token-matching for markets (e.g., matching "pune market" to "pune apmc")
+    matched_markets = set()
+    for m in all_markets:
+        if m in query_lower:
+            matched_markets.add(m)
+        else:
+            # If a standalone word from the query matches a core word in the market name
+            for word in query_lower.split():
+                if len(word) > 3 and word not in ["market", "apmc"] and word in m:
+                    matched_markets.add(m)
+
+    # 4. Filter with Strict Intersection Logic (AND rules instead of blind OR rules)
+    relevant_records = []
     for row in market_data:
         state = str(row.get("State", "")).strip().lower()
         commodity = str(row.get("Commodity", "")).strip().lower()
         market = str(row.get("Market", "")).strip().lower()
         
-        # Added a length check (>2) to prevent empty strings or tiny acronyms from creating false positives
-        if (len(state) > 2 and state in query_lower) or \
-           (len(commodity) > 2 and commodity in query_lower) or \
-           (len(market) > 2 and market in query_lower):
-            relevant_records.append(row)
+        # If a category was detected in the query, the row MUST match it. 
+        # If that category wasn't mentioned, skip verification for it (defaults to True).
+        state_match = (state in matched_states) if matched_states else True
+        commodity_match = (commodity in matched_commodities) if matched_commodities else True
+        market_match = (market in matched_markets) if matched_markets else True
+        
+        # Only include rows that satisfy all active criteria targets
+        if (matched_states or matched_commodities or matched_markets):
+            if state_match and commodity_match and market_match:
+                relevant_records.append(row)
             
-    # 3. Handle Broad Queries & Data Droughts
+    # 5. Handle Broad Queries & True Data Droughts
     if not relevant_records:
         # Check for superlative global queries (Highest/Top)
         if any(word in query_lower for word in ["highest", "max", "top", "most expensive"]):
-            # Sort descending by price safely
             sorted_data = sorted(
                 market_data, 
                 key=lambda x: float(x.get("Modal_Price", 0)) if str(x.get("Modal_Price", 0)).replace('.', '', 1).isdigit() else 0, 
@@ -128,27 +156,25 @@ def chat_with_data(request: ChatRequest):
             
         # Check for superlative global queries (Lowest/Bottom)
         elif any(word in query_lower for word in ["lowest", "min", "cheapest", "bottom"]):
-            # Filter out zeroes, then sort ascending
             valid_prices = [
                 x for x in market_data 
                 if str(x.get("Modal_Price", 0)).replace('.', '', 1).isdigit() and float(x.get("Modal_Price", 0)) > 0
             ]
-            sorted_data = sorted(valid_prices, key=lambda x: float(x.get("Modal_Price", 0)))
-            records_to_send = sorted_data[:80]
+            records_to_send = sorted(valid_prices, key=lambda x: float(x.get("Modal_Price", 0)))[:80]
             
         else:
-            # The True "Data Drought" Diagnostic Handler
-            unique_states = list({r.get("State") for r in market_data if r.get("State") and r.get("State") != "Unknown"})
-            unique_commodities = list({r.get("Commodity") for r in market_data if r.get("Commodity") and r.get("Commodity") != "Unknown"})
+            # The True Data Drought Diagnostic Handler
+            unique_states_list = list(all_states)
+            unique_comms_list = list(all_commodities)
             
-            # Dynamically grab up to 3 samples from today's live data
-            sample_states = ", ".join(unique_states[:3]) if unique_states else "various states"
-            sample_comms = ", ".join(unique_commodities[:3]) if unique_commodities else "various commodities"
+            sample_states = ", ".join([s.title() for s in unique_states_list[:3]]) if unique_states_list else "various regions"
+            sample_comms = ", ".join([c.title() for c in unique_comms_list[:3]]) if unique_comms_list else "various crops"
             
             return {
                 "reply": f"I couldn't find data for that specific request in today's batch. However, today's live records currently feature states like **{sample_states}** and commodities like **{sample_comms}**. Could you try asking about one of those?"
             }
     else:
+        # Prioritize matching records up to token window capability
         records_to_send = relevant_records[:80]
         
     flattened_data = json.dumps(records_to_send, separators=(',', ':'))
