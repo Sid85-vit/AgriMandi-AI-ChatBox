@@ -38,14 +38,19 @@ class ChatRequest(BaseModel):
 def fetch_live_government_data():
     API_KEY = os.getenv("GOV_API_KEY")
     RESOURCE_ID = "35985678-0d79-46b4-9ed6-6f13308a1d24"    
+
+    LIMIT = 10000 
+    offset = 0
+    all_mapped_records = []
+    
     # Increased limit to 10000 to ensure we capture a 4-5 day rolling buffer 
-    base_url = f"https://api.data.gov.in/resource/{RESOURCE_ID}?api-key={API_KEY}&format=json&limit=10000"    
+    base_url = f"https://api.data.gov.in/resource/{RESOURCE_ID}?api-key={API_KEY}&format=json&limit={LIMIT}&offset={offset}"    
 
     if target_date_str:
         encoded_date = urllib.parse.quote(target_date_str, safe='')
         api_url = base_url + f"&filters[Arrival_Date]={encoded_date}"
     else:
-        api_url = base_url
+        api_url = base_url + "&sort[Arrival_Date]=desc"
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -61,20 +66,25 @@ def fetch_live_government_data():
             print(f"DEBUG: Full API response: {data}")
             
         raw_records = data.get("records", [])
+        if not raw_records:
+            break
         
-        mapped_records = []
         for row in raw_records:
-            mapped_records.append({
+            all_mapped_records.append({
                 "State": row.get("State") or row.get("state") or "Unknown",
                 "Market": row.get("Market") or row.get("market") or "Unknown",
                 "Commodity": row.get("Commodity") or row.get("commodity") or "Unknown",
                 "Arrival_Date": row.get("Arrival_Date") or row.get("arrival_date") or "Unknown",
                 "Modal_Price": str(row.get("Modal_Price") or row.get("modal_price") or "0")
             })
-        return mapped_records
+
+        if len(raw_records) < LIMIT:
+            break
+        offset += LIMIT
     except Exception as e:
         print(f"API Connection Failed: {e}")
         return []
+return all_mapped_records
 
 @app.get("/api/data")
 def get_latest_data():
