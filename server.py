@@ -108,7 +108,7 @@ def fetch_live_government_data(target_date_str=None):
 # ==========================================
 # ROUTE 1: The Delta Sync Engine
 # ==========================================
-@app.post("/api/sync")
+@app.get("/api/sync")
 def run_delta_sync():
     today = datetime.now().date()
     
