@@ -5,3 +5,4 @@ python-dotenv
 pydantic
 groq
 dateparser==1.2.0
+supabase
