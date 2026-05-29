@@ -1,12 +1,15 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import Optional
 import json
 import os
 import requests
 from dotenv import load_dotenv
 from groq import Groq
 import re
+from datetime import datetime, timedelta
+import dateparser
 
 load_dotenv()
 
@@ -27,11 +30,14 @@ DATA_FILE = "mandi_data.json"
 
 class ChatRequest(BaseModel):
     message: str
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
 
 def fetch_live_government_data():
     API_KEY = os.getenv("GOV_API_KEY")
     RESOURCE_ID = "9ef84268-d588-465a-a308-a864a43d0070"    
-    api_url = f"https://api.data.gov.in/resource/{RESOURCE_ID}?api-key={API_KEY}&format=json&limit=5000"    
+    # Increased limit to 10000 to ensure we capture a 4-5 day rolling buffer 
+    api_url = f"https://api.data.gov.in/resource/{RESOURCE_ID}?api-key={API_KEY}&format=json&limit=10000"    
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -76,7 +82,6 @@ def get_latest_data():
 
 @app.post("/api/chat")
 def chat_with_data(request: ChatRequest):
-    # 1. Helper utility to safely handle commas, whitespaces, and dirty API values
     def parse_price(val):
         if val is None:
             return 0.0
@@ -85,6 +90,36 @@ def chat_with_data(request: ChatRequest):
             return float(clean_str)
         except ValueError:
             return 0.0
+
+    # 1. Date Resolution Engine
+    today = datetime.now()
+    target_start = None
+    target_end = None
+
+    # Check UI calendar inputs first
+    if request.start_date and request.end_date:
+        try:
+            target_start = datetime.strptime(request.start_date, "%Y-%m-%d").date()
+            target_end = datetime.strptime(request.end_date, "%Y-%m-%d").date()
+        except ValueError:
+            pass
+
+    # If UI calendar is empty, fallback to NLP parsing on the prompt
+    if not target_start:
+        parsed_date = dateparser.parse(request.message, settings={'PREFER_DATES_FROM': 'past', 'STRICT_PARSING': False})
+        if parsed_date:
+            target_start = parsed_date.date()
+            target_end = parsed_date.date()
+        else:
+            # Default fallback: Last 5 days window
+            target_start = (today - timedelta(days=5)).date()
+            target_end = today.date()
+
+    # Generate list of acceptable date strings to match Gov API format (DD/MM/YYYY)
+    date_range_strs = [
+        (target_start + timedelta(days=x)).strftime("%d/%m/%Y") 
+        for x in range((target_end - target_start).days + 1)
+    ]
 
     # 2. Load data with self-healing fallback
     market_data = []
@@ -107,44 +142,41 @@ def chat_with_data(request: ChatRequest):
             
     query_lower = request.message.lower().strip()
     
-    # 3. Extract unique available entities from today's dataset for cross-referencing
-    all_states = set()
-    all_commodities = set()
-    all_markets = set()
+    # Extract sets
+    all_states, all_commodities, all_markets = set(), set(), set()
     for row in market_data:
         if row.get("State"): all_states.add(str(row["State"]).strip().lower())
         if row.get("Commodity"): all_commodities.add(str(row["Commodity"]).strip().lower())
         if row.get("Market"): all_markets.add(str(row["Market"]).strip().lower())
         
-    # Clean out empty strings or tiny anomalies
     all_states = {s for s in all_states if len(s) > 2 and s != "unknown"}
     all_commodities = {c for c in all_commodities if len(c) > 2 and c != "unknown"}
     all_markets = {m for m in all_markets if len(m) > 2 and m != "unknown"}
     
-    # 4. Smart Entity Extraction: Detect categories using STRICT WORD BOUNDARIES (The Regex Fix)
-    # Extract clean words from the query (removes punctuation like question marks)
+    # 4. Smart Entity Extraction
     query_words = set(re.findall(r'\b\w+\b', query_lower)) 
     
-    # This prevents "rice" from matching inside "price", or "goa" inside "goal"
     matched_states = {s for s in all_states if re.search(rf"\b{re.escape(s)}\b", query_lower)}
     matched_commodities = {c for c in all_commodities if re.search(rf"\b{re.escape(c)}\b", query_lower)}
     
-    # Advanced token-matching for markets
     matched_markets = set()
     for m in all_markets:
-        # Full exact match check first
         if re.search(rf"\b{re.escape(m)}\b", query_lower):
             matched_markets.add(m)
         else:
-            # Check if any standalone word from the query matches a core word in the market name
             market_words = set(re.findall(r'\b\w+\b', m))
             for word in query_words:
                 if len(word) > 3 and word not in ["market", "apmc"] and word in market_words:
                     matched_markets.add(m)
 
-    # 5. Filter with Strict Intersection Logic (AND rules instead of blind OR rules)
+    # 5. Filter with Strict Intersection & Time-Series Date Logic
     relevant_records = []
     for row in market_data:
+        # Time-Series Filter
+        arrival_date = str(row.get("Arrival_Date", "")).strip()
+        if arrival_date not in date_range_strs:
+            continue # Skip records outside our target window
+
         state = str(row.get("State", "")).strip().lower()
         commodity = str(row.get("Commodity", "")).strip().lower()
         market = str(row.get("Market", "")).strip().lower()
@@ -157,42 +189,29 @@ def chat_with_data(request: ChatRequest):
             if state_match and commodity_match and market_match:
                 relevant_records.append(row)
             
-    # 6. Prioritized Superlative Sorting Engine & Broad Queries
-    # If the user filtered data, look within those records. Otherwise, evaluate globally.
-    source_data = relevant_records if relevant_records else market_data
+    # 6. Prioritized Superlative Sorting Engine
+    source_data = relevant_records if relevant_records else [r for r in market_data if str(r.get("Arrival_Date", "")).strip() in date_range_strs]
     
     is_highest_query = any(word in query_lower for word in ["highest", "max", "top", "most expensive"])
     is_lowest_query = any(word in query_lower for word in ["lowest", "min", "cheapest", "bottom"])
     
     if is_highest_query:
-        # Sort descending by cleanly parsed numerical prices
         records_to_send = sorted(source_data, key=lambda x: parse_price(x.get("Modal_Price", 0)), reverse=True)[:80]
-        
     elif is_lowest_query:
-        # Filter out 0/negative prices for lowest searches to eliminate corrupted records
         valid_prices = [x for x in source_data if parse_price(x.get("Modal_Price", 0)) > 0]
         records_to_send = sorted(valid_prices, key=lambda x: parse_price(x.get("Modal_Price", 0)))[:80]
-        
     else:
-        # If no superlative was requested but the filtered search came up empty -> True Data Drought
         if not relevant_records:
-            unique_states_list = list(all_states)
-            unique_comms_list = list(all_commodities)
-            
-            sample_states = ", ".join([s.title() for s in unique_states_list[:3]]) if unique_states_list else "various regions"
-            sample_comms = ", ".join([c.title() for c in unique_comms_list[:3]]) if unique_comms_list else "various crops"
-            
             return {
-                "reply": f"I couldn't find data for that specific request in today's batch. However, today's live records currently feature states like **{sample_states}** and commodities like **{sample_comms}**. Could you try asking about one of those?"
+                "reply": f"I couldn't find exact data for that request between {target_start.strftime('%b %d')} and {target_end.strftime('%b %d')}. Try expanding your date range or adjusting the commodity name."
             }
-        # Standard filter response
         records_to_send = relevant_records[:80]
         
     # 7. Compress and ship to Groq
     flattened_data = json.dumps(records_to_send, separators=(',', ':'))
     
     system_instruction = (
-        "You are Agri Mandi Bot. Summarize price data: Min, Max, Avg. Use Markdown tables."
+        f"You are Agri Mandi Bot. Summarize price data: Min, Max, Avg for the period {target_start.strftime('%Y-%m-%d')} to {target_end.strftime('%Y-%m-%d')}. Use Markdown tables."
         f"\n\nDATA: {flattened_data}\n\nUSER QUERY: {request.message}"
     )
 
