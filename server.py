@@ -6,6 +6,7 @@ import os
 import requests
 from dotenv import load_dotenv
 from groq import Groq
+import re
 
 load_dotenv()
 
@@ -75,7 +76,7 @@ def get_latest_data():
 
 @app.post("/api/chat")
 def chat_with_data(request: ChatRequest):
-    # Helper utility to safely handle commas, whitespaces, and dirty API values
+    # 1. Helper utility to safely handle commas, whitespaces, and dirty API values
     def parse_price(val):
         if val is None:
             return 0.0
@@ -85,7 +86,7 @@ def chat_with_data(request: ChatRequest):
         except ValueError:
             return 0.0
 
-    # 1. Load data with self-healing fallback
+    # 2. Load data with self-healing fallback
     market_data = []
     if os.path.exists(DATA_FILE):
         try:
@@ -106,7 +107,7 @@ def chat_with_data(request: ChatRequest):
             
     query_lower = request.message.lower().strip()
     
-    # 2. Extract unique available entities from today's dataset for cross-referencing
+    # 3. Extract unique available entities from today's dataset for cross-referencing
     all_states = set()
     all_commodities = set()
     all_markets = set()
@@ -120,21 +121,28 @@ def chat_with_data(request: ChatRequest):
     all_commodities = {c for c in all_commodities if len(c) > 2 and c != "unknown"}
     all_markets = {m for m in all_markets if len(m) > 2 and m != "unknown"}
     
-    # 3. Smart Entity Extraction: Detect what categories the user is actually targeting
-    matched_states = {s for s in all_states if s in query_lower}
-    matched_commodities = {c for c in all_commodities if c in query_lower}
+    # 4. Smart Entity Extraction: Detect categories using STRICT WORD BOUNDARIES (The Regex Fix)
+    # Extract clean words from the query (removes punctuation like question marks)
+    query_words = set(re.findall(r'\b\w+\b', query_lower)) 
     
-    # Advanced token-matching for markets (e.g., matching "pune market" to "pune apmc")
+    # This prevents "rice" from matching inside "price", or "goa" inside "goal"
+    matched_states = {s for s in all_states if re.search(rf"\b{re.escape(s)}\b", query_lower)}
+    matched_commodities = {c for c in all_commodities if re.search(rf"\b{re.escape(c)}\b", query_lower)}
+    
+    # Advanced token-matching for markets
     matched_markets = set()
     for m in all_markets:
-        if m in query_lower:
+        # Full exact match check first
+        if re.search(rf"\b{re.escape(m)}\b", query_lower):
             matched_markets.add(m)
         else:
-            for word in query_lower.split():
-                if len(word) > 3 and word not in ["market", "apmc"] and word in m:
+            # Check if any standalone word from the query matches a core word in the market name
+            market_words = set(re.findall(r'\b\w+\b', m))
+            for word in query_words:
+                if len(word) > 3 and word not in ["market", "apmc"] and word in market_words:
                     matched_markets.add(m)
 
-    # 4. Filter with Strict Intersection Logic (AND rules instead of blind OR rules)
+    # 5. Filter with Strict Intersection Logic (AND rules instead of blind OR rules)
     relevant_records = []
     for row in market_data:
         state = str(row.get("State", "")).strip().lower()
@@ -149,7 +157,7 @@ def chat_with_data(request: ChatRequest):
             if state_match and commodity_match and market_match:
                 relevant_records.append(row)
             
-    # 5. Prioritized Superlative Sorting Engine & Broad Queries
+    # 6. Prioritized Superlative Sorting Engine & Broad Queries
     # If the user filtered data, look within those records. Otherwise, evaluate globally.
     source_data = relevant_records if relevant_records else market_data
     
@@ -180,7 +188,7 @@ def chat_with_data(request: ChatRequest):
         # Standard filter response
         records_to_send = relevant_records[:80]
         
-    # 6. Compress and ship to Groq
+    # 7. Compress and ship to Groq
     flattened_data = json.dumps(records_to_send, separators=(',', ':'))
     
     system_instruction = (
