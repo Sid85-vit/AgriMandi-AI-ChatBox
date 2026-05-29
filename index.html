@@ -134,6 +134,12 @@ function triggerDataFetchOnEvent() {
     const endVal = endDateInput.value;
 
     if (startVal && endVal) {
+      if (new Date(endVal) < new Date(startVal)) {
+            addBotMsg("⚠️ Your End Date cannot be before your Start Date. Please adjust the calendar.");
+            document.getElementById('data-status').textContent = `Invalid Date Range`;
+            document.getElementById('data-status').className = 'badge warn';
+            return;
+        }
         document.getElementById('data-status').textContent = `Fetching data for selected dates...`;
         document.getElementById('data-status').className = 'badge';
         
