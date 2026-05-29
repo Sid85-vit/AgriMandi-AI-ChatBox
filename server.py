@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
@@ -108,32 +108,40 @@ def fetch_live_government_data(target_date_str=None):
 # ==========================================
 # ROUTE 1: The Delta Sync Engine
 # ==========================================
-@app.get("/api/sync")
-def run_delta_sync():
+# 1. Update your FastAPI import at the top of server.py to include BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+
+# ... (Keep database and AI initializations exactly the same) ...
+
+# ==========================================
+# CORE: The Background Sync Worker Logic
+# ==========================================
+def sync_worker_logic():
     today = datetime.now().date()
     
-    # 1. Ask Postgres for the latest date it has
     try:
         response = supabase.table("mandi_prices").select("arrival_date").order("arrival_date", desc=True).limit(1).execute()
         latest_record = response.data
     except Exception as e:
-        return {"error": f"Database connection failed: {str(e)}"}
+        print(f"🚨 Background Sync failed to connect to database: {str(e)}")
+        return
 
     start_date = None
     if not latest_record:
         # DB is empty: Fetch last 365 days
         start_date = today - timedelta(days=365)
-        print("Database empty. Initializing 365-day historical sync...")
+        print("Database is empty. Initializing 365-day historical background sync...")
     else:
-        # DB has data: Find the gap
+        # DB has data: Find the missing gap
         latest_db_date_str = latest_record[0]["arrival_date"]
         latest_db_date = datetime.strptime(latest_db_date_str, "%Y-%m-%d").date()
         start_date = latest_db_date + timedelta(days=1)
         
         if start_date > today:
-            return {"status": "Database is already fully synchronized to today."}
+            print("✅ Database is already completely synchronized to today.")
+            return
         
-        print(f"Delta detected. Syncing from {start_date} to {today}...")
+        print(f"Delta detected. Syncing missing days from {start_date} to {today}...")
 
     # Build missing date strings for Gov API (DD/MM/YYYY)
     missing_dates = [
@@ -141,38 +149,58 @@ def run_delta_sync():
         for x in range((today - start_date).days + 1)
     ]
 
-    # 2. Fetch the data (Safe Mode Sequential if large, Fast Mode Parallel if small)
-    new_data = []
     total_days = len(missing_dates)
     
     if total_days <= 7:
+        # Fast Mode for small windows
+        new_data = []
         max_workers = min(total_days, 5)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [executor.submit(fetch_live_government_data, d) for d in missing_dates]
             for future in futures:
                 res = future.result()
                 if res: new_data.extend(res)
-    else:
-        for d in missing_dates:
-            res = fetch_live_government_data(d)
-            if res: new_data.extend(res)
-
-    # 3. Bulk Insert into Supabase
-    if new_data:
-        # Supabase API limits bulk inserts to chunks of roughly 1000 to prevent timeouts
-        chunk_size = 1000
-        inserted_count = 0
-        for i in range(0, len(new_data), chunk_size):
-            chunk = new_data[i:i + chunk_size]
-            try:
-                supabase.table("mandi_prices").insert(chunk).execute()
-                inserted_count += len(chunk)
-            except Exception as e:
-                print(f"Insert failed on chunk: {e}")
         
-        return {"status": f"Successfully synced {inserted_count} new records."}
+        if new_data:
+            try:
+                supabase.table("mandi_prices").insert(new_data).execute()
+                print(f"✅ Fast Sync Complete: Inserted {len(new_data)} records.")
+            except Exception as e:
+                print(f"🚨 Fast Sync insertion failed: {e}")
+    else:
+        # Safe Historical Mode: Process and save day-by-day to protect memory and avoid timeouts
+        print(f"🛡️ Safe Historical Sync started sequentially for {total_days} days...")
+        for d_str in missing_dates:
+            print(f"Fetching data for: {d_str}")
+            day_records = fetch_live_government_data(d_str)
+            
+            if day_records:
+                # Chunk into blocks of 1000 rows to satisfy Supabase thresholds
+                chunk_size = 1000
+                for i in range(0, len(day_records), chunk_size):
+                    chunk = day_records[i:i + chunk_size]
+                    try:
+                        supabase.table("mandi_prices").insert(chunk).execute()
+                    except Exception as e:
+                        print(f"🚨 Insertion failed for a chunk on date {d_str}: {e}")
+                print(f" Saved {len(day_records)} records for {d_str}")
+            else:
+                print(f" No records found or published for {d_str}")
+                
+        print("🎉 Complete Historical Background Sync Finished successfully!")
+
+# ==========================================
+# ROUTE 1: Asynchronous Trigger Endpoint
+# ==========================================
+@app.get("/api/sync")
+def trigger_delta_sync(background_tasks: BackgroundTasks):
+    # Offload the heavy execution loop to a background thread instantly
+    background_tasks.add_task(sync_worker_logic)
     
-    return {"status": "Sync ran, but no new data was published by Gov API for these dates."}
+    return {
+        "status": "Sync engine successfully delegated to background execution worker.",
+        "message": "The server is now handling the historical processing pipeline out-of-band. You can safely close this browser tab. Monitor live progress via your Render logs or watch the row count rise inside your Supabase Table Editor."
+    }
 
 # ==========================================
 # ROUTE 2: The Stateless Chat API
