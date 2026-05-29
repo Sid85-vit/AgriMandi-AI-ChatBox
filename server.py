@@ -12,6 +12,8 @@ from datetime import datetime, timedelta
 import dateparser
 from concurrent.futures import ThreadPoolExecutor
 import urllib.parse
+import time
+import random
 
 load_dotenv()
 
@@ -34,6 +36,7 @@ class ChatRequest(BaseModel):
     end_date: Optional[str] = None
 
 def fetch_live_government_data(target_date_str=None):
+    time.sleep(random.uniform(0.1, 1.5))
     API_KEY = os.getenv("GOV_API_KEY")
     RESOURCE_ID = "35985678-0d79-46b4-9ed6-6f13308a1d24"    
 
