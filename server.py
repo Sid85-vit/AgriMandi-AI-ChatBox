@@ -35,7 +35,8 @@ class ChatRequest(BaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
 
-def fetch_live_government_data():
+# FIXED: Added the missing target_date_str parameter and the while loop
+def fetch_live_government_data(target_date_str=None):
     API_KEY = os.getenv("GOV_API_KEY")
     RESOURCE_ID = "35985678-0d79-46b4-9ed6-6f13308a1d24"    
 
@@ -43,60 +44,57 @@ def fetch_live_government_data():
     offset = 0
     all_mapped_records = []
     
-    # Increased limit to 10000 to ensure we capture a 4-5 day rolling buffer 
-    base_url = f"https://api.data.gov.in/resource/{RESOURCE_ID}?api-key={API_KEY}&format=json&limit={LIMIT}&offset={offset}"    
+    # The while loop ensures we paginate through days with more than 10k records
+    while True:
+        base_url = f"https://api.data.gov.in/resource/{RESOURCE_ID}?api-key={API_KEY}&format=json&limit={LIMIT}&offset={offset}"    
 
-    if target_date_str:
-        encoded_date = urllib.parse.quote(target_date_str, safe='')
-        api_url = base_url + f"&filters[Arrival_Date]={encoded_date}"
-    else:
-        api_url = base_url + "&sort[Arrival_Date]=desc"
-    
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json"
-    }
-    
-    try:
-        response = requests.get(api_url, headers=headers, timeout=30)
-        data = response.json()
-
-        print(f"DEBUG: Raw API Response Keys: {data.keys()}")
-        if "records" not in data:
-            print(f"DEBUG: Full API response: {data}")
-            
-        raw_records = data.get("records", [])
-        if not raw_records:
-            break
+        if target_date_str:
+            encoded_date = urllib.parse.quote(target_date_str, safe='')
+            api_url = base_url + f"&filters[Arrival_Date]={encoded_date}"
+        else:
+            api_url = base_url + "&sort[Arrival_Date]=desc"
         
-        for row in raw_records:
-            all_mapped_records.append({
-                "State": row.get("State") or row.get("state") or "Unknown",
-                "Market": row.get("Market") or row.get("market") or "Unknown",
-                "Commodity": row.get("Commodity") or row.get("commodity") or "Unknown",
-                "Arrival_Date": row.get("Arrival_Date") or row.get("arrival_date") or "Unknown",
-                "Modal_Price": str(row.get("Modal_Price") or row.get("modal_price") or "0")
-            })
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json"
+        }
+        
+        try:
+            response = requests.get(api_url, headers=headers, timeout=30)
+            data = response.json()
+            
+            raw_records = data.get("records", [])
+            
+            # Break loop if API returns empty list
+            if not raw_records:
+                break
+            
+            for row in raw_records:
+                all_mapped_records.append({
+                    "State": row.get("State") or row.get("state") or "Unknown",
+                    "Market": row.get("Market") or row.get("market") or "Unknown",
+                    "Commodity": row.get("Commodity") or row.get("commodity") or "Unknown",
+                    "Arrival_Date": row.get("Arrival_Date") or row.get("arrival_date") or "Unknown",
+                    "Modal_Price": str(row.get("Modal_Price") or row.get("modal_price") or "0")
+                })
 
-        if len(raw_records) < LIMIT:
+            # Break loop if we are on the final page
+            if len(raw_records) < LIMIT:
+                break
+            
+            offset += LIMIT
+            
+        except Exception as e:
+            print(f"API Connection Failed: {e}")
             break
-        offset += LIMIT
-    except Exception as e:
-        print(f"API Connection Failed: {e}")
-        return []
-return all_mapped_records
+            
+    return all_mapped_records
 
+# Cleaned up /api/data. It's mostly dead code now, but harmless to leave for debugging.
 @app.get("/api/data")
 def get_latest_data():
     live_data = fetch_live_government_data()
-    if live_data:
-        with open(DATA_FILE, "w") as file:
-            json.dump(live_data, file, indent=4)
-        return live_data
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r") as file:
-            return json.load(file)
-    return []
+    return live_data
 
 @app.post("/api/chat")
 def chat_with_data(request: ChatRequest):
@@ -109,7 +107,7 @@ def chat_with_data(request: ChatRequest):
         except ValueError:
             return 0.0
 
-    # 1. Date Resolution Engine
+    # 1. Event-Driven Date Resolution Engine
     today = datetime.now()
     target_start = None
     target_end = None
@@ -123,15 +121,17 @@ def chat_with_data(request: ChatRequest):
             pass
 
     # If UI calendar is empty, fallback to NLP parsing on the prompt
-    if not target_start:
+    if not target_start and request.message:
         parsed_date = dateparser.parse(request.message, settings={'PREFER_DATES_FROM': 'past', 'STRICT_PARSING': False})
         if parsed_date:
             target_start = parsed_date.date()
             target_end = parsed_date.date()
-        else:
-            # Default fallback: Last 5 days window
-            target_start = (today - timedelta(days=5)).date()
-            target_end = today.date()
+
+    # FIXED: Strict Event-Driven Check. If no date is found, ask the user to pick one.
+    if not target_start:
+        return {
+            "reply": "📅 Please select an arrival date or date range using the calendar controls above to fetch live market records."
+        }
 
     # Generate list of acceptable date strings to match Gov API format (DD/MM/YYYY)
     date_range_strs = [
@@ -142,10 +142,8 @@ def chat_with_data(request: ChatRequest):
     # 2. Dynamic Parallel Fetching via Gov API Native Date Filters
     market_data = []
     
-    # Use multi-threading to fetch data for all target dates concurrently
     max_workers = min(len(date_range_strs), 5)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit live fetch tasks for each encoded date string stringently
         futures = [executor.submit(fetch_live_government_data, d_str) for d_str in date_range_strs]
         for future in futures:
             try:
@@ -157,7 +155,7 @@ def chat_with_data(request: ChatRequest):
 
     if not market_data:
         return {
-            "reply": "I couldn't retrieve any live market records from the government API for the requested dates. Please verify the date or try again later."
+            "reply": f"I couldn't retrieve any live market records from the government API for the requested dates ({target_start.strftime('%d/%m/%Y')} - {target_end.strftime('%d/%m/%Y')}). The Mandis might be closed, or data hasn't been uploaded yet."
         }
             
     query_lower = request.message.lower().strip()
@@ -194,7 +192,7 @@ def chat_with_data(request: ChatRequest):
     for row in market_data:
         arrival_date = str(row.get("Arrival_Date", "")).strip()
         if arrival_date not in date_range_strs:
-            continue # Safe structural boundary cross-check
+            continue 
 
         state = str(row.get("State", "")).strip().lower()
         commodity = str(row.get("Commodity", "")).strip().lower()
@@ -220,9 +218,9 @@ def chat_with_data(request: ChatRequest):
         valid_prices = [x for x in source_data if parse_price(x.get("Modal_Price", 0)) > 0]
         records_to_send = sorted(valid_prices, key=lambda x: parse_price(x.get("Modal_Price", 0)))[:80]
     else:
-        if not relevant_records:
+        if not relevant_records and request.message:
             return {
-                "reply": f"I couldn't find exact data for that request between {target_start.strftime('%b %d')} and {target_end.strftime('%b %d')}. Try expanding your date range or checking available parameters."
+                "reply": f"I couldn't find exact data for that request between {target_start.strftime('%b %d')} and {target_end.strftime('%b %d')}. Try expanding your date range or adjusting the commodity name."
             }
         records_to_send = relevant_records[:80]
         
@@ -231,7 +229,7 @@ def chat_with_data(request: ChatRequest):
     
     system_instruction = (
         f"You are Agri Mandi Bot. Summarize price data: Min, Max, Avg for the period {target_start.strftime('%Y-%m-%d')} to {target_end.strftime('%Y-%m-%d')}. Use Markdown tables."
-        f"\n\nDATA: {flattened_data}\n\nUSER QUERY: {request.message}"
+        f"\n\nDATA: {flattened_data}\n\nUSER QUERY: {request.message or 'Summarize this day\\'s market report'}"
     )
 
     try:
@@ -239,7 +237,7 @@ def chat_with_data(request: ChatRequest):
             model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": system_instruction},
-                {"role": "user", "content": request.message}
+                {"role": "user", "content": request.message or "Give me a high-level summary of the selected data."}
             ],
             temperature=0.2
         )
