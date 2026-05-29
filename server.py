@@ -208,6 +208,7 @@ def chat_with_data(request: ChatRequest):
                 relevant_records.append(row)
             
     # 6. Prioritized Superlative Sorting Engine
+    # Fallback to the raw filtered date array if no specific keywords were matched
     source_data = relevant_records if relevant_records else [r for r in market_data if str(r.get("Arrival_Date", "")).strip() in date_range_strs]
     
     is_highest_query = any(word in query_lower for word in ["highest", "max", "top", "most expensive"])
@@ -219,11 +220,14 @@ def chat_with_data(request: ChatRequest):
         valid_prices = [x for x in source_data if parse_price(x.get("Modal_Price", 0)) > 0]
         records_to_send = sorted(valid_prices, key=lambda x: parse_price(x.get("Modal_Price", 0)))[:80]
     else:
+        # If the user typed a specific keyword but it yielded zero matches
         if not relevant_records and request.message:
             return {
                 "reply": f"I couldn't find exact data matching your keywords for the requested dates. Try expanding your date range or adjusting the commodity name."
             }
-        records_to_send = relevant_records[:80]
+        
+        # If it's a generic query OR the calendar's background auto-fetch, send the broad source data
+        records_to_send = source_data[:80]
         
     # 7. Compress and ship to Groq
     flattened_data = json.dumps(records_to_send, separators=(',', ':'))
