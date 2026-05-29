@@ -10,6 +10,8 @@ from groq import Groq
 import re
 from datetime import datetime, timedelta
 import dateparser
+from concurrent.futures import ThreadPoolExecutor
+import urllib.parse
 
 load_dotenv()
 
@@ -35,9 +37,15 @@ class ChatRequest(BaseModel):
 
 def fetch_live_government_data():
     API_KEY = os.getenv("GOV_API_KEY")
-    RESOURCE_ID = "9ef84268-d588-465a-a308-a864a43d0070"    
+    RESOURCE_ID = "35985678-0d79-46b4-9ed6-6f13308a1d24"    
     # Increased limit to 10000 to ensure we capture a 4-5 day rolling buffer 
-    api_url = f"https://api.data.gov.in/resource/{RESOURCE_ID}?api-key={API_KEY}&format=json&limit=10000"    
+    base_url = f"https://api.data.gov.in/resource/{RESOURCE_ID}?api-key={API_KEY}&format=json&limit=10000"    
+
+    if target_date_str:
+        encoded_date = urllib.parse.quote(target_date_str, safe='')
+        api_url = base_url + f"&filters[Arrival_Date]={encoded_date}"
+    else:
+        api_url = base_url
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -121,28 +129,30 @@ def chat_with_data(request: ChatRequest):
         for x in range((target_end - target_start).days + 1)
     ]
 
-    # 2. Load data with self-healing fallback
+    # 2. Dynamic Parallel Fetching via Gov API Native Date Filters
     market_data = []
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, "r") as file:
-                market_data = json.load(file)
-        except json.JSONDecodeError:
-            market_data = []
+    
+    # Use multi-threading to fetch data for all target dates concurrently
+    max_workers = min(len(date_range_strs), 5)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit live fetch tasks for each encoded date string stringently
+        futures = [executor.submit(fetch_live_government_data, d_str) for d_str in date_range_strs]
+        for future in futures:
+            try:
+                records = future.result()
+                if records:
+                    market_data.extend(records)
+            except Exception as e:
+                print(f"🚨 Parallel API Fetch Failed for a single thread: {str(e)}")
 
     if not market_data:
-        print("DEBUG: Local file missing. Fetching live data for chat...")
-        market_data = fetch_live_government_data()
-        if market_data:
-            with open(DATA_FILE, "w") as file:
-                json.dump(market_data, file, indent=4)
-
-    if not market_data:
-        return {"reply": "The database is currently empty. Please wait for the next data fetch."}
+        return {
+            "reply": "I couldn't retrieve any live market records from the government API for the requested dates. Please verify the date or try again later."
+        }
             
     query_lower = request.message.lower().strip()
     
-    # Extract sets
+    # 3. Extract Unique Entity Sets for Mapping
     all_states, all_commodities, all_markets = set(), set(), set()
     for row in market_data:
         if row.get("State"): all_states.add(str(row["State"]).strip().lower())
@@ -172,10 +182,9 @@ def chat_with_data(request: ChatRequest):
     # 5. Filter with Strict Intersection & Time-Series Date Logic
     relevant_records = []
     for row in market_data:
-        # Time-Series Filter
         arrival_date = str(row.get("Arrival_Date", "")).strip()
         if arrival_date not in date_range_strs:
-            continue # Skip records outside our target window
+            continue # Safe structural boundary cross-check
 
         state = str(row.get("State", "")).strip().lower()
         commodity = str(row.get("Commodity", "")).strip().lower()
@@ -203,7 +212,7 @@ def chat_with_data(request: ChatRequest):
     else:
         if not relevant_records:
             return {
-                "reply": f"I couldn't find exact data for that request between {target_start.strftime('%b %d')} and {target_end.strftime('%b %d')}. Try expanding your date range or adjusting the commodity name."
+                "reply": f"I couldn't find exact data for that request between {target_start.strftime('%b %d')} and {target_end.strftime('%b %d')}. Try expanding your date range or checking available parameters."
             }
         records_to_send = relevant_records[:80]
         
