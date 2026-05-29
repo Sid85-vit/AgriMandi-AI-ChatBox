@@ -75,6 +75,16 @@ def get_latest_data():
 
 @app.post("/api/chat")
 def chat_with_data(request: ChatRequest):
+    # Helper utility to safely handle commas, whitespaces, and dirty API values
+    def parse_price(val):
+        if val is None:
+            return 0.0
+        clean_str = str(val).replace(',', '').strip()
+        try:
+            return float(clean_str)
+        except ValueError:
+            return 0.0
+
     # 1. Load data with self-healing fallback
     market_data = []
     if os.path.exists(DATA_FILE):
@@ -120,7 +130,6 @@ def chat_with_data(request: ChatRequest):
         if m in query_lower:
             matched_markets.add(m)
         else:
-            # If a standalone word from the query matches a core word in the market name
             for word in query_lower.split():
                 if len(word) > 3 and word not in ["market", "apmc"] and word in m:
                     matched_markets.add(m)
@@ -132,38 +141,33 @@ def chat_with_data(request: ChatRequest):
         commodity = str(row.get("Commodity", "")).strip().lower()
         market = str(row.get("Market", "")).strip().lower()
         
-        # If a category was detected in the query, the row MUST match it. 
-        # If that category wasn't mentioned, skip verification for it (defaults to True).
         state_match = (state in matched_states) if matched_states else True
         commodity_match = (commodity in matched_commodities) if matched_commodities else True
         market_match = (market in matched_markets) if matched_markets else True
         
-        # Only include rows that satisfy all active criteria targets
         if (matched_states or matched_commodities or matched_markets):
             if state_match and commodity_match and market_match:
                 relevant_records.append(row)
             
-    # 5. Handle Broad Queries & True Data Droughts
-    if not relevant_records:
-        # Check for superlative global queries (Highest/Top)
-        if any(word in query_lower for word in ["highest", "max", "top", "most expensive"]):
-            sorted_data = sorted(
-                market_data, 
-                key=lambda x: float(x.get("Modal_Price", 0)) if str(x.get("Modal_Price", 0)).replace('.', '', 1).isdigit() else 0, 
-                reverse=True
-            )
-            records_to_send = sorted_data[:80]
-            
-        # Check for superlative global queries (Lowest/Bottom)
-        elif any(word in query_lower for word in ["lowest", "min", "cheapest", "bottom"]):
-            valid_prices = [
-                x for x in market_data 
-                if str(x.get("Modal_Price", 0)).replace('.', '', 1).isdigit() and float(x.get("Modal_Price", 0)) > 0
-            ]
-            records_to_send = sorted(valid_prices, key=lambda x: float(x.get("Modal_Price", 0)))[:80]
-            
-        else:
-            # The True Data Drought Diagnostic Handler
+    # 5. Prioritized Superlative Sorting Engine & Broad Queries
+    # If the user filtered data, look within those records. Otherwise, evaluate globally.
+    source_data = relevant_records if relevant_records else market_data
+    
+    is_highest_query = any(word in query_lower for word in ["highest", "max", "top", "most expensive"])
+    is_lowest_query = any(word in query_lower for word in ["lowest", "min", "cheapest", "bottom"])
+    
+    if is_highest_query:
+        # Sort descending by cleanly parsed numerical prices
+        records_to_send = sorted(source_data, key=lambda x: parse_price(x.get("Modal_Price", 0)), reverse=True)[:80]
+        
+    elif is_lowest_query:
+        # Filter out 0/negative prices for lowest searches to eliminate corrupted records
+        valid_prices = [x for x in source_data if parse_price(x.get("Modal_Price", 0)) > 0]
+        records_to_send = sorted(valid_prices, key=lambda x: parse_price(x.get("Modal_Price", 0)))[:80]
+        
+    else:
+        # If no superlative was requested but the filtered search came up empty -> True Data Drought
+        if not relevant_records:
             unique_states_list = list(all_states)
             unique_comms_list = list(all_commodities)
             
@@ -173,10 +177,10 @@ def chat_with_data(request: ChatRequest):
             return {
                 "reply": f"I couldn't find data for that specific request in today's batch. However, today's live records currently feature states like **{sample_states}** and commodities like **{sample_comms}**. Could you try asking about one of those?"
             }
-    else:
-        # Prioritize matching records up to token window capability
+        # Standard filter response
         records_to_send = relevant_records[:80]
         
+    # 6. Compress and ship to Groq
     flattened_data = json.dumps(records_to_send, separators=(',', ':'))
     
     system_instruction = (
