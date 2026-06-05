@@ -99,7 +99,7 @@ def fetch_live_government_data(target_date_str=None):
                 print(f"⚠️ Sanity cap ({max_expected_per_day}) exceeded for {target_date_str}. Halting.")
                 break
 
-            valid_records_in_this_batch = False
+            valid_records_in_this_batch = 0
             
             for row in raw_records:
                 raw_date = str(row.get("Arrival_Date") or row.get("arrival_date") or "").strip()
@@ -108,7 +108,7 @@ def fetch_live_government_data(target_date_str=None):
                 if target_date_str and raw_date != target_date_str:
                     continue # Skip rogue data sent by the government API
                 
-                valid_records_in_this_batch = True
+                valid_records_in_this_batch += 1
                 
                 # Convert Gov DD/MM/YYYY into Postgres YYYY-MM-DD
                 pg_date = None
@@ -134,9 +134,13 @@ def fetch_live_government_data(target_date_str=None):
             if len(raw_records) < LIMIT: break
             
             # 🔥 Prevent Infinite Filter Loop 🔥
-            if target_date_str and not valid_records_in_this_batch:
-                print(f"⚠️ API ignored date filter for {target_date_str}. Halting pagination.")
-                break
+            if target_date_str:
+                if valid_records_in_this_batch == 0:
+                    print(f"⚠️ API ignored date filter for {target_date_str}. Halting pagination.")
+                    break    
+            else:
+                offset += LIMIT
+                continue
                 
             offset += LIMIT
             
