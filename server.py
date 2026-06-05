@@ -55,6 +55,11 @@ def fetch_live_government_data(target_date_str=None):
     offset = 0
     all_mapped_records = []
     
+    # 🔥 NEW: Circuit Breaker Trackers 🔥
+    max_expected_per_day = 30000 # Indian Mandi API rarely exceeds 15k/day
+    records_fetched_this_session = 0
+    previous_page_first_id = None
+    
     while True:
         base_url = f"https://api.data.gov.in/resource/{RESOURCE_ID}?api-key={API_KEY}&format=json&limit={LIMIT}&offset={offset}"    
 
@@ -76,12 +81,27 @@ def fetch_live_government_data(target_date_str=None):
             
             if not raw_records: break
             
+            # 🔥 NEW: Duplicate Page Circuit Breaker 🔥
+            # If the API glitches and serves Page 1 again, the first record will match
+            current_page_first_id = f"{raw_records[0].get('State')}_{raw_records[0].get('Market')}_{raw_records[0].get('Commodity')}_{raw_records[0].get('Arrival_Date')}"
+            
+            if current_page_first_id == previous_page_first_id:
+                print(f"⚠️ Pagination Loop detected (Duplicate page). Halting at offset {offset}.")
+                break
+            previous_page_first_id = current_page_first_id
+            
+            # 🔥 NEW: Absolute Sanity Cap Breaker 🔥
+            records_fetched_this_session += len(raw_records)
+            if target_date_str and records_fetched_this_session > max_expected_per_day:
+                print(f"⚠️ Sanity cap ({max_expected_per_day}) exceeded for {target_date_str}. Halting.")
+                break
+
             valid_records_in_this_batch = False
             
             for row in raw_records:
                 raw_date = str(row.get("Arrival_Date") or row.get("arrival_date") or "").strip()
                 
-                # 🔥 THE CRITICAL FIX: The Government API Glitch Filter 🔥
+                # 🔥 EXISTING: The Government API Glitch Filter 🔥
                 if target_date_str and raw_date != target_date_str:
                     continue # Skip rogue data sent by the government API
                 
@@ -110,9 +130,7 @@ def fetch_live_government_data(target_date_str=None):
             # Break if we hit the natural end of the data
             if len(raw_records) < LIMIT: break
             
-            # 🔥 PREVENT INFINITE LOOP 🔥
-            # If the API gave us 10,000 records but ZERO of them matched our requested date, 
-            # the Gov API is ignoring our filter. Abort pagination immediately.
+            # 🔥 EXISTING: Prevent Infinite Filter Loop 🔥
             if target_date_str and not valid_records_in_this_batch:
                 print(f"⚠️ API ignored date filter for {target_date_str}. Halting pagination.")
                 break
