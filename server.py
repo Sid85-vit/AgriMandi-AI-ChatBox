@@ -198,13 +198,32 @@ def sync_worker_logic():
         day_records = fetch_live_government_data(d_str)
 
         if day_records:
+            # Deduplicate within the batch before hitting Postgres
+            seen = set()
+            unique_records = []
+            for record in day_records:
+                key = (
+                    record["state"],
+                    record["market"], 
+                    record["commodity"],
+                    record["arrival_date"],
+                    record["modal_price"]
+                )
+                if key not in seen:
+                    seen.add(key)
+                    unique_records.append(record)
+            
+            day_records = unique_records
+            print(f"  Deduped to {len(day_records)} unique records")
+
+        if day_records:
             chunk_size = 1000
             for i in range(0, len(day_records), chunk_size):
                 try:
                     upsert_chunk(day_records[i:i + chunk_size])
                 except Exception as e:
                     print(f"🚨 Upsert failed for chunk on {d_str}: {e}")
-                    return  # Stop cleanly; next trigger will resume from last good date
+                    continue  # Stop cleanly; next trigger will resume from last good date
 
             date_obj = datetime.strptime(d_str, "%d/%m/%Y").date()
             mark_date_complete(date_obj)
