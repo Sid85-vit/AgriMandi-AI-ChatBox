@@ -155,80 +155,66 @@ def fetch_live_government_data(target_date_str=None):
 # ==========================================
 def sync_worker_logic():
     today = datetime.now().date()
-    
-    try:
-        response = supabase.table("mandi_prices").select("arrival_date").order("arrival_date", desc=True).limit(1).execute()
-        latest_record = response.data
-    except Exception as e:
-        print(f"🚨 Background Sync failed to connect to database: {str(e)}")
-        return
 
-    start_date = None
-    if not latest_record:
-        start_date = today - timedelta(days=365)
-        print("Database is empty. Initializing 365-day historical background sync...")
-    else:
-        latest_db_date_str = latest_record[0]["arrival_date"]
-        latest_db_date = datetime.strptime(latest_db_date_str, "%Y-%m-%d").date()
-        start_date = latest_db_date - timedelta(days=2)  # Re-sync last 3 days always
-        
-        if start_date > today:
-            print("✅ Database is already completely synchronized to today.")
-            return
-        
-        print(f"Delta detected. Syncing missing days from {start_date} to {today}...")
-
-    missing_dates = [
-        (start_date + timedelta(days=x)).strftime("%d/%m/%Y") 
-        for x in range((today - start_date).days + 1)
-    ]
-
-    total_days = len(missing_dates)
-    
-    # ✅ UPSERT helper — used by both Fast and Safe modes
     def upsert_chunk(chunk):
         supabase.table("mandi_prices").upsert(
             chunk,
             on_conflict="state,market,commodity,arrival_date,modal_price"
         ).execute()
 
-    if total_days <= 7:
-        # Fast Mode: parallel fetch for small windows
-        new_data = []
-        max_workers = min(total_days, 5)
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [executor.submit(fetch_live_government_data, d) for d in missing_dates]
-            for future in futures:
-                res = future.result()
-                if res: new_data.extend(res)
-        
-        if new_data:
-            try:
-                chunk_size = 1000
-                for i in range(0, len(new_data), chunk_size):
-                    upsert_chunk(new_data[i:i + chunk_size])
-                print(f"✅ Fast Sync Complete: Upserted {len(new_data)} records.")
-            except Exception as e:
-                print(f"🚨 Fast Sync upsert failed: {e}")
-    else:
-        # Safe Historical Mode: sequential, day-by-day
-        print(f"🛡️ Safe Historical Sync started sequentially for {total_days} days...")
-        for d_str in missing_dates:
-            print(f"Fetching data for: {d_str}")
-            day_records = fetch_live_government_data(d_str)
-            
-            if day_records:
-                chunk_size = 1000
-                for i in range(0, len(day_records), chunk_size):
-                    try:
-                        upsert_chunk(day_records[i:i + chunk_size])
-                    except Exception as e:
-                        print(f"🚨 Upsert failed for a chunk on date {d_str}: {e}")
-                print(f"✅ Saved {len(day_records)} records for {d_str}")
-            else:
-                print(f"⚠️ No records found or published for {d_str}")
-                
-        print("🎉 Complete Historical Background Sync Finished successfully!")
+    def get_resume_date():
+        res = supabase.table("sync_state").select("value").eq("key", "last_synced_date").execute()
+        val = res.data[0]["value"] if res.data else None
+        if val:
+            return datetime.strptime(val, "%Y-%m-%d").date() + timedelta(days=1)
+        return today - timedelta(days=365)
+
+    def mark_date_complete(date_obj):
+        supabase.table("sync_state").upsert({
+            "key": "last_synced_date",
+            "value": date_obj.strftime("%Y-%m-%d"),
+            "updated_at": datetime.now().isoformat()
+        }, on_conflict="key").execute()
+
+    start_date = get_resume_date()
+
+    if start_date > today:
+        print("✅ Database is already completely synchronized to today.")
+        return
+
+    # Always re-sync last 3 days to catch partial inserts from prior crashes
+    start_date = min(start_date, today - timedelta(days=2))
+
+    missing_dates = [
+        (start_date + timedelta(days=x)).strftime("%d/%m/%Y")
+        for x in range((today - start_date).days + 1)
+    ]
+
+    total_days = len(missing_dates)
+    print(f"🛡️ Resumable sync started for {total_days} days from {start_date}...")
+
+    for d_str in missing_dates:
+        print(f"Fetching data for: {d_str}")
+        day_records = fetch_live_government_data(d_str)
+
+        if day_records:
+            chunk_size = 1000
+            for i in range(0, len(day_records), chunk_size):
+                try:
+                    upsert_chunk(day_records[i:i + chunk_size])
+                except Exception as e:
+                    print(f"🚨 Upsert failed for chunk on {d_str}: {e}")
+                    return  # Stop cleanly; next trigger will resume from last good date
+
+            date_obj = datetime.strptime(d_str, "%d/%m/%Y").date()
+            mark_date_complete(date_obj)
+            print(f"✅ Saved & checkpointed {len(day_records)} records for {d_str}")
+        else:
+            date_obj = datetime.strptime(d_str, "%d/%m/%Y").date()
+            mark_date_complete(date_obj)
+            print(f"⚠️ No records for {d_str} — checkpointed and skipped")
+
+    print("🎉 Sync complete!")
 
 
 # ==========================================
