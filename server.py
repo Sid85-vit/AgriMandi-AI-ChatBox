@@ -43,6 +43,9 @@ class ChatRequest(BaseModel):
 # ==========================================
 # CORE: The Safe Data Fetcher (From Gov API)
 # ==========================================
+# ==========================================
+# CORE: The Safe Data Fetcher (From Gov API)
+# ==========================================
 def fetch_live_government_data(target_date_str=None):
     time.sleep(random.uniform(0.1, 1.5)) # Anti-ban jitter
     
@@ -73,16 +76,24 @@ def fetch_live_government_data(target_date_str=None):
             
             if not raw_records: break
             
+            valid_records_in_this_batch = False
+            
             for row in raw_records:
+                raw_date = str(row.get("Arrival_Date") or row.get("arrival_date") or "").strip()
+                
+                # 🔥 THE CRITICAL FIX: The Government API Glitch Filter 🔥
+                if target_date_str and raw_date != target_date_str:
+                    continue # Skip rogue data sent by the government API
+                
+                valid_records_in_this_batch = True
+                
                 # Convert Gov DD/MM/YYYY into Postgres YYYY-MM-DD
-                raw_date = row.get("Arrival_Date") or row.get("arrival_date")
                 pg_date = None
                 if raw_date:
                     try:
                         pg_date = datetime.strptime(raw_date, "%d/%m/%Y").strftime("%Y-%m-%d")
                     except: pass
                 
-                # Parse numeric price cleanly for the DB
                 raw_price = str(row.get("Modal_Price") or row.get("modal_price") or "0").replace(',', '').strip()
                 try: clean_price = float(raw_price)
                 except: clean_price = 0.0
@@ -96,7 +107,16 @@ def fetch_live_government_data(target_date_str=None):
                         "modal_price": clean_price
                     })
 
+            # Break if we hit the natural end of the data
             if len(raw_records) < LIMIT: break
+            
+            # 🔥 PREVENT INFINITE LOOP 🔥
+            # If the API gave us 10,000 records but ZERO of them matched our requested date, 
+            # the Gov API is ignoring our filter. Abort pagination immediately.
+            if target_date_str and not valid_records_in_this_batch:
+                print(f"⚠️ API ignored date filter for {target_date_str}. Halting pagination.")
+                break
+                
             offset += LIMIT
             
         except Exception as e:
@@ -104,7 +124,7 @@ def fetch_live_government_data(target_date_str=None):
             break
             
     return all_mapped_records
-
+    
 # ==========================================
 # ROUTE 1: The Delta Sync Engine
 # ==========================================
