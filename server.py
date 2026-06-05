@@ -170,7 +170,7 @@ def sync_worker_logic():
     else:
         latest_db_date_str = latest_record[0]["arrival_date"]
         latest_db_date = datetime.strptime(latest_db_date_str, "%Y-%m-%d").date()
-        start_date = latest_db_date + timedelta(days=1)
+        start_date = latest_db_date - timedelta(days=2)  # Re-sync last 3 days always
         
         if start_date > today:
             print("✅ Database is already completely synchronized to today.")
