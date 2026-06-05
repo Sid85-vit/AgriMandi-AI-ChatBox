@@ -40,9 +40,7 @@ class ChatRequest(BaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
 
-# ==========================================
-# CORE: The Safe Data Fetcher (From Gov API)
-# ==========================================
+
 # ==========================================
 # CORE: The Safe Data Fetcher (From Gov API)
 # ==========================================
@@ -55,7 +53,7 @@ def fetch_live_government_data(target_date_str=None):
     offset = 0
     all_mapped_records = []
     
-    # 🔥 NEW: Circuit Breaker Trackers 🔥
+    # 🔥 Circuit Breaker Trackers 🔥
     max_expected_per_day = 30000 # Indian Mandi API rarely exceeds 15k/day
     records_fetched_this_session = 0
     previous_page_first_id = None
@@ -81,16 +79,21 @@ def fetch_live_government_data(target_date_str=None):
             
             if not raw_records: break
             
-            # 🔥 NEW: Duplicate Page Circuit Breaker 🔥
-            # If the API glitches and serves Page 1 again, the first record will match
-            current_page_first_id = f"{raw_records[0].get('State')}_{raw_records[0].get('Market')}_{raw_records[0].get('Commodity')}_{raw_records[0].get('Arrival_Date')}"
+            # 🔥 FIX 1: Duplicate Page Circuit Breaker (Safely handling lowercase keys) 🔥
+            r0 = raw_records[0]
+            state_val = r0.get('State') or r0.get('state') or 'unknown'
+            market_val = r0.get('Market') or r0.get('market') or 'unknown'
+            commodity_val = r0.get('Commodity') or r0.get('commodity') or 'unknown'
+            date_val = r0.get('Arrival_Date') or r0.get('arrival_date') or 'unknown'
+            
+            current_page_first_id = f"{state_val}_{market_val}_{commodity_val}_{date_val}"
             
             if current_page_first_id == previous_page_first_id:
                 print(f"⚠️ Pagination Loop detected (Duplicate page). Halting at offset {offset}.")
                 break
             previous_page_first_id = current_page_first_id
             
-            # 🔥 NEW: Absolute Sanity Cap Breaker 🔥
+            # 🔥 Absolute Sanity Cap Breaker 🔥
             records_fetched_this_session += len(raw_records)
             if target_date_str and records_fetched_this_session > max_expected_per_day:
                 print(f"⚠️ Sanity cap ({max_expected_per_day}) exceeded for {target_date_str}. Halting.")
@@ -101,7 +104,7 @@ def fetch_live_government_data(target_date_str=None):
             for row in raw_records:
                 raw_date = str(row.get("Arrival_Date") or row.get("arrival_date") or "").strip()
                 
-                # 🔥 EXISTING: The Government API Glitch Filter 🔥
+                # 🔥 The Government API Glitch Filter 🔥
                 if target_date_str and raw_date != target_date_str:
                     continue # Skip rogue data sent by the government API
                 
@@ -130,7 +133,7 @@ def fetch_live_government_data(target_date_str=None):
             # Break if we hit the natural end of the data
             if len(raw_records) < LIMIT: break
             
-            # 🔥 EXISTING: Prevent Infinite Filter Loop 🔥
+            # 🔥 Prevent Infinite Filter Loop 🔥
             if target_date_str and not valid_records_in_this_batch:
                 print(f"⚠️ API ignored date filter for {target_date_str}. Halting pagination.")
                 break
@@ -143,13 +146,6 @@ def fetch_live_government_data(target_date_str=None):
             
     return all_mapped_records
     
-# ==========================================
-# ROUTE 1: The Delta Sync Engine
-# ==========================================
-# 1. Update your FastAPI import at the top of server.py to include BackgroundTasks
-from fastapi import FastAPI, HTTPException, BackgroundTasks
-
-# ... (Keep database and AI initializations exactly the same) ...
 
 # ==========================================
 # CORE: The Background Sync Worker Logic
@@ -201,7 +197,11 @@ def sync_worker_logic():
         
         if new_data:
             try:
-                supabase.table("mandi_prices").insert(new_data).execute()
+                # 🔥 FIX 2: Chunking Fast Mode inserts to prevent Supabase 413 Errors 🔥
+                chunk_size = 1000
+                for i in range(0, len(new_data), chunk_size):
+                    chunk = new_data[i:i + chunk_size]
+                    supabase.table("mandi_prices").insert(chunk).execute()
                 print(f"✅ Fast Sync Complete: Inserted {len(new_data)} records.")
             except Exception as e:
                 print(f"🚨 Fast Sync insertion failed: {e}")
@@ -227,6 +227,7 @@ def sync_worker_logic():
                 
         print("🎉 Complete Historical Background Sync Finished successfully!")
 
+
 # ==========================================
 # ROUTE 1: Asynchronous Trigger Endpoint
 # ==========================================
@@ -239,6 +240,7 @@ def trigger_delta_sync(background_tasks: BackgroundTasks):
         "status": "Sync engine successfully delegated to background execution worker.",
         "message": "The server is now handling the historical processing pipeline out-of-band. You can safely close this browser tab. Monitor live progress via your Render logs or watch the row count rise inside your Supabase Table Editor."
     }
+
 
 # ==========================================
 # ROUTE 2: The Stateless Chat API
@@ -350,6 +352,7 @@ def chat_with_data(request: ChatRequest):
         return {"reply": response.choices[0].message.content}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     import uvicorn
