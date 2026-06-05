@@ -3,71 +3,84 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Agri Mandi Chatbot</title>
+<title>Agri Mandi Intelligence Chatbot</title>
 <style>
   h2.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: sans-serif; background-color: #f9f9f9; padding: 20px;}
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f4f6f8; padding: 20px; color: #333;}
 
   :root {
-    --color-text-primary: #333;
-    --color-text-secondary: #666;
-    --color-text-tertiary: #999;
-    --color-text-success: #2e7d32;
-    --color-text-warning: #ed6c02;
-    --color-text-info: #0288d1;
-    --color-background-primary: #fff;
-    --color-background-secondary: #f5f5f5;
+    --color-text-primary: #1a1a1a;
+    --color-text-secondary: #4a5568;
+    --color-text-tertiary: #718096;
+    --color-text-success: #1b5e20;
+    --color-text-warning: #b78103;
+    --color-text-info: #0d47a1;
+    --color-background-primary: #ffffff;
+    --color-background-secondary: #f8fafc;
     --color-background-success: #e8f5e9;
-    --color-background-warning: #fff3e0;
-    --color-background-info: #e1f5fe;
-    --color-border-secondary: #e0e0e0;
-    --color-border-tertiary: #eee;
+    --color-background-warning: #fffde7;
+    --color-background-info: #e3f2fd;
+    --color-border-secondary: #cbd5e1;
+    --color-border-tertiary: #f1f5f9;
     --border-radius-md: 8px;
-    --border-radius-lg: 12px;
+    --border-radius-lg: 16px;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.1);
+    --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03);
   }
 
-  .app { display: flex; flex-direction: column; gap: 16px; max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);}
+  .app { display: flex; flex-direction: column; gap: 20px; max-width: 900px; margin: 40px auto; background: var(--color-background-primary); padding: 24px; border-radius: var(--border-radius-lg); box-shadow: var(--shadow-md);}
 
-  .top-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-  .logo { font-size: 18px; font-weight: 600; color: var(--color-text-primary); display: flex; align-items: center; gap: 8px; }
-  .badge { font-size: 12px; padding: 4px 10px; border-radius: 20px; background: var(--color-background-success); color: var(--color-text-success); font-weight: 500; }
+  .top-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-bottom: 1px solid var(--color-border-tertiary); padding-bottom: 16px; }
+  .logo { font-size: 22px; font-weight: 700; color: var(--color-text-primary); display: flex; align-items: center; gap: 8px; }
+  .badge { font-size: 13px; padding: 6px 14px; border-radius: 30px; background: var(--color-background-success); color: var(--color-text-success); font-weight: 600; display: flex; align-items: center; gap: 6px; }
   .badge.warn { background: var(--color-background-warning); color: var(--color-text-warning); }
 
-  .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
-  .stat-card { background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 12px 14px; text-align: center;}
-  .stat-card .lbl { font-size: 11px; color: var(--color-text-secondary); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.4px; }
-  .stat-card .val { font-size: 20px; font-weight: 600; color: var(--color-text-primary); }
+  .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 4px; }
+  .stat-card { background: var(--color-background-secondary); border: 1px solid var(--color-border-tertiary); border-radius: var(--border-radius-md); padding: 14px; text-align: left; box-shadow: var(--shadow-sm); }
+  .stat-card .lbl { font-size: 11px; color: var(--color-text-tertiary); font-weight: 700; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat-card .val { font-size: 16px; font-weight: 600; color: var(--color-text-primary); }
   .stat-card .val.green { color: var(--color-text-success); }
-  .stat-card .val.amber { color: var(--color-text-warning); }
+  .stat-card .val.info { color: var(--color-text-info); }
 
-  .chat-box { border: 1px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); background: var(--color-background-primary); overflow: hidden; }
-  .chat-messages { height: 400px; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
-  .msg { display: flex; gap: 10px; align-items: flex-start; }
-  .msg.user { flex-direction: row-reverse; }
-  .msg-avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; flex-shrink: 0; }
-  .msg-avatar.bot { background: var(--color-background-success); color: var(--color-text-success); }
-  .msg-avatar.user { background: var(--color-background-info); color: var(--color-text-info); }
-  .msg-bubble { max-width: 80%; padding: 12px 16px; border-radius: 14px; font-size: 14px; line-height: 1.5; }
-  .msg.bot .msg-bubble { background: var(--color-background-secondary); color: var(--color-text-primary); border-bottom-left-radius: 4px; }
-  .msg.user .msg-bubble { background: var(--color-background-info); color: var(--color-text-info); border-bottom-right-radius: 4px; }
+  .chat-box { border: 1px solid var(--color-border-secondary); border-radius: var(--border-radius-lg); background: var(--color-background-primary); overflow: hidden; box-shadow: var(--shadow-sm); }
+  .chat-messages { height: 450px; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; background: #fafbfc; }
+  
+  .msg { display: flex; gap: 12px; align-items: flex-start; max-width: 85%; }
+  .msg.user { margin-left: auto; flex-direction: row-reverse; max-width: 75%; }
+  .msg-avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: bold; flex-shrink: 0; box-shadow: var(--shadow-sm); }
+  .msg-avatar.bot { background: var(--color-background-success); color: var(--color-text-success); border: 1px solid rgba(0,0,0,0.05); }
+  .msg-avatar.user { background: var(--color-background-info); color: var(--color-text-info); border: 1px solid rgba(0,0,0,0.05); }
+  
+  .msg-bubble { padding: 14px 18px; border-radius: 18px; font-size: 14.5px; line-height: 1.6; box-shadow: var(--shadow-sm); }
+  .msg.bot .msg-bubble { background: var(--color-background-primary); color: var(--color-text-primary); border: 1px solid var(--color-border-tertiary); border-top-left-radius: 4px; }
+  .msg.user .msg-bubble { background: var(--color-text-info); color: white; border-top-right-radius: 4px; }
 
-  .typing-dots { display: flex; gap: 4px; align-items: center; padding: 6px 4px; }
-  .typing-dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--text-tertiary); animation: bounce 1s infinite; }
+  /* Markdown Table Styles within Chat Bubble */
+  .mandi-table-container { overflow-x: auto; margin: 12px 0; border: 1px solid var(--color-border-secondary); border-radius: var(--border-radius-md); }
+  .mandi-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13.5px; }
+  .mandi-table th { background: var(--color-background-secondary); padding: 10px 12px; font-weight: 600; color: var(--color-text-primary); border-bottom: 2px solid var(--color-border-secondary); }
+  .mandi-table td { padding: 10px 12px; border-bottom: 1px solid var(--color-border-tertiary); color: var(--color-text-secondary); }
+  .mandi-table tr:last-child td { border-bottom: none; }
+  .mandi-table tr:nth-child(even) { background: var(--color-background-secondary); }
+
+  .typing-dots { display: flex; gap: 4px; align-items: center; padding: 8px 4px; }
+  .typing-dots span { width: 7px; height: 7px; border-radius: 50%; background: var(--color-text-tertiary); animation: bounce 1s infinite; }
   .typing-dots span:nth-child(2) { animation-delay: 0.15s; }
   .typing-dots span:nth-child(3) { animation-delay: 0.3s; }
-  @keyframes bounce { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-6px)} }
+  @keyframes bounce { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-7px)} }
 
-  .chat-input-row { border-top: 1px solid var(--color-border-tertiary); display: flex; }
-  .chat-input-row input { flex: 1; border: none; padding: 16px; font-size: 14px; outline: none; }
-  .chat-input-row button { padding: 0 20px; border: none; border-left: 1px solid var(--color-border-tertiary); background: transparent; cursor: pointer; color: var(--color-text-success); font-weight: bold; transition: background 0.1s; }
-  .chat-input-row button:hover { background: var(--color-background-secondary); }
+  .chat-input-row { border-top: 1px solid var(--color-border-secondary); display: flex; background: var(--color-background-primary); }
+  .chat-input-row input { flex: 1; border: none; padding: 18px 20px; font-size: 15px; outline: none; color: var(--color-text-primary); }
+  .chat-input-row button { padding: 0 28px; border: none; border-left: 1px solid var(--color-border-tertiary); background: transparent; cursor: pointer; color: var(--color-text-success); font-size: 15px; font-weight: 700; transition: all 0.2s; letter-spacing: 0.5px; }
+  .chat-input-row button:hover { background: var(--color-background-secondary); color: #1b5e20; }
+  .chat-input-row button:disabled { color: var(--color-text-tertiary); cursor: not-allowed; background: transparent; }
 
-  .quick-btns { display: flex; gap: 8px; flex-wrap: wrap; padding: 12px 16px; border-top: 1px solid var(--color-border-tertiary); background: var(--color-background-secondary); }
-  .qbtn { font-size: 12px; padding: 6px 12px; border-radius: 20px; border: 1px solid var(--color-border-secondary); background: white; cursor: pointer; transition: 0.2s; }
-  .qbtn:hover { background: var(--color-text-success); color: white; border-color: var(--color-text-success); }
+  .quick-btns { display: flex; gap: 10px; flex-wrap: wrap; padding: 14px 20px; border-top: 1px solid var(--color-border-tertiary); background: var(--color-background-secondary); }
+  .qbtn { font-size: 13px; padding: 8px 16px; border-radius: 30px; border: 1px solid var(--color-border-secondary); background: var(--color-background-primary); font-weight: 500; color: var(--color-text-secondary); cursor: pointer; transition: all 0.2s; box-shadow: var(--shadow-sm); }
+  .qbtn:hover { background: var(--color-text-success); color: white; border-color: var(--color-text-success); transform: translateY(-1px); }
   
-  .privacy-note { font-size: 12px; color: var(--color-text-tertiary); text-align: center; margin-top: 10px;}
+  .privacy-note { font-size: 12px; color: var(--color-text-tertiary); text-align: center; margin-top: 4px; letter-spacing: 0.2px;}
 </style>
 </head>
 <body>
@@ -76,72 +89,95 @@
 
 <div class="app" id="app">
   <div class="top-bar">
-    <div class="logo">🌱 Agri Mandi Chatbot</div>
-    <span class="badge" id="data-status">Ready - Select a Date</span>
+    <div class="logo">🌱 Agri Mandi Intelligence Dashboard</div>
+    <span class="badge" id="data-status">Syncing Engine Ready</span>
   </div>
 
-  <div class="stats-row" id="stats-row" style="display:none"></div>
+  <!-- Unhidden & Restructured Stats Row for Relational Database Metrics -->
+  <div class="stats-row" id="stats-row">
+    <div class="stat-card">
+      <div class="lbl">Data Architecture</div>
+      <div class="val info">PostgreSQL Data Warehouse</div>
+    </div>
+    <div class="stat-card">
+      <div class="lbl">Query Pipeline</div>
+      <div class="val green">Indexed Relational Filtering</div>
+    </div>
+    <div class="stat-card">
+      <div class="lbl">LLM Synthesis Window</div>
+      <div class="val">Top 80 Dynamic Records</div>
+    </div>
+  </div>
 
   <div class="chat-box">
     <div class="chat-messages" id="chat-messages">
       <div class="msg bot">
         <div class="msg-avatar bot">🌱</div>
-        <div class="msg-bubble">Hello! I'm your Agri Mandi assistant. Please select an arrival date or date range using the calendar below to fetch live market records.</div>
+        <div class="msg-bubble">Hello! I'm your Agri Mandi intelligence assistant. I am connected directly to your dedicated database warehouse. Select a date range below to query historical and current market trends instantly.</div>
       </div>
     </div>
+    
     <div class="quick-btns" id="quick-btns">
-      <button class="qbtn" onclick="askQuestion('Which state and market has the highest price commodity today?')">Highest price today ↗</button>
-      <button class="qbtn" onclick="askQuestion('Give me a detailed breakdown of Mango and Cauliflower prices across states.')">State price comparisons ↗</button>
-      <button class="qbtn" onclick="askQuestion('Show me the prices of all items registered in Kerala.')">Kerala Mandi Prices ↗</button>
+      <button class="qbtn" onclick="askQuestion('Which state and market has the highest price commodity in this range?')">Highest market peaks ↗</button>
+      <button class="qbtn" onclick="askQuestion('Give me a detailed markdown table breakdown comparing Potato and Tomato prices across states.')">Commodity comparison grid ↗</button>
+      <button class="qbtn" onclick="askQuestion('Show me the average prices of all items registered in Uttar Pradesh.')">UP Mandi performance ↗</button>
     </div>
+    
     <div class="chat-input-row" style="flex-direction: column;">
-      
-      <div style="display: flex; gap: 10px; padding: 10px 16px; background: var(--color-background-secondary); border-bottom: 1px solid var(--color-border-tertiary); align-items: center; flex-wrap: wrap;">
-        <label style="font-size: 12px; font-weight: bold; color: var(--color-text-secondary);">Filter Dates:</label>
-        <input type="date" id="start-date" title="Start Date" style="padding: 6px; border: 1px solid var(--color-border-secondary); border-radius: 4px; font-size: 12px;">
-        <span style="font-size: 12px; color: var(--color-text-secondary);">to</span>
-        <input type="date" id="end-date" title="End Date" style="padding: 6px; border: 1px solid var(--color-border-secondary); border-radius: 4px; font-size: 12px;">
-        <span style="font-size: 11px; color: var(--color-text-tertiary); margin-left: auto;">(Required for queries)</span>
+      <div style="display: flex; gap: 12px; padding: 12px 20px; background: var(--color-background-secondary); border-bottom: 1px solid var(--color-border-secondary); align-items: center; flex-wrap: wrap;">
+        <label style="font-size: 13px; font-weight: 700; color: var(--color-text-secondary);">Warehouse Scope:</label>
+        <input type="date" id="start-date" title="Start Date" style="padding: 6px 10px; border: 1px solid var(--color-border-secondary); border-radius: var(--border-radius-md); font-size: 13px; color: var(--color-text-primary); font-weight: 500;">
+        <span style="font-size: 13px; color: var(--color-text-tertiary); font-weight: bold;">to</span>
+        <input type="date" id="end-date" title="End Date" style="padding: 6px 10px; border: 1px solid var(--color-border-secondary); border-radius: var(--border-radius-md); font-size: 13px; color: var(--color-text-primary); font-weight: 500;">
+        <span style="font-size: 12px; color: var(--color-text-tertiary); margin-left: auto; font-style: italic;">Filters apply dynamically via indexed columns</span>
       </div>
 
       <div style="display: flex; width: 100%;">
-        <input id="chat-input" type="text" placeholder="Ask about commodities, prices, predictions…" onkeydown="if(event.key==='Enter')sendMsg()" />
+        <input id="chat-input" type="text" placeholder="Ask about price averages, variations, anomalies or projections..." onkeydown="if(event.key==='Enter')sendMsg()" />
         <button onclick="sendMsg()" id="send-btn">SEND</button>
       </div>
     </div>
   </div>
 
   <div class="privacy-note">
-    🔒 Data sourced directly from data.gov.in. AI analysis powered securely via cloud backend proxy.
+    🔒 Data warehouse initialized via PostgREST proxy layer. Execution offloaded entirely to cloud cluster database.
   </div>
 </div>
 
 <script>
-// Grab calendar inputs
 const startDateInput = document.getElementById('start-date');
 const endDateInput = document.getElementById('end-date');
 
-// Streamlined onload function for Event-Driven architecture
+// Automatically pre-populate calendars with a sensible rolling 7-day window up to today
 window.onload = function() {
-    // We no longer fetch 10,000 rows on load. The UI is ready immediately.
-    document.getElementById('data-status').textContent = `Idle - Waiting for Date Selection`;
-    document.getElementById('data-status').className = 'badge warn';
+    const today = new Date();
+    const lastWeek = new Date();
+    lastWeek.setDate(today.getDate() - 7);
+
+    // Format to standard YYYY-MM-DD strings required by input elements
+    const formatDate = (d) => d.toISOString().split('T')[0];
+
+    startDateInput.value = formatDate(lastWeek);
+    endDateInput.value = formatDate(today);
+
+    document.getElementById('data-status').textContent = `Warehouse Connected`;
+    document.getElementById('data-status').className = 'badge';
 };
 
-// Auto-trigger fetch when dates are selected
 function triggerDataFetchOnEvent() {
     const startVal = startDateInput.value;
     const endVal = endDateInput.value;
 
     if (startVal && endVal) {
-      if (new Date(endVal) < new Date(startVal)) {
-            addBotMsg("⚠️ Your End Date cannot be before your Start Date. Please adjust the calendar.");
-            document.getElementById('data-status').textContent = `Invalid Date Range`;
+        if (new Date(endVal) < new Date(startVal)) {
+            addBotMsg("⚠️ Chronological mismatch: Your End Date cannot sit prior to your Start Date. Please adjust the parameters.");
+            document.getElementById('data-status').textContent = `Invalid Window`;
             document.getElementById('data-status').className = 'badge warn';
             return;
         }
-        document.getElementById('data-status').textContent = `Fetching data for selected dates...`;
-        document.getElementById('data-status').className = 'badge';
+        
+        document.getElementById('data-status').textContent = `Querying data range...`;
+        document.getElementById('data-status').className = 'badge warn';
         
         const typingDiv = addBotMsg('', true);
 
@@ -151,41 +187,96 @@ function triggerDataFetchOnEvent() {
             body: JSON.stringify({
                 start_date: startVal,
                 end_date: endVal,
-                message: "" // Empty string triggers the backend's day summary logic
+                message: "" // Triggers warehouse summary evaluation loop
             })
         })
         .then(res => res.json())
         .then(data => {
             typingDiv.remove();
-            addBotMsg(data.reply || "Data loaded. Feel free to ask specific questions about these dates!");
-            document.getElementById('data-status').textContent = `Data Synced via AI`;
+            addBotMsg(data.reply || "Database subset loaded cleanly. Procedural filters applied.");
+            document.getElementById('data-status').textContent = `Warehouse Synchronized`;
             document.getElementById('data-status').className = 'badge';
         })
         .catch(err => {
             console.error(err);
             typingDiv.remove();
-            addBotMsg("⚠️ Error fetching data in the background. Is your server running?");
-            document.getElementById('data-status').textContent = `Fetch Failed`;
+            addBotMsg("⚠️ Network validation failure: Couldn't reach the warehouse backend. Ensure your FastAPI instances are operational.");
+            document.getElementById('data-status').textContent = `Sync Disrupted`;
             document.getElementById('data-status').className = 'badge warn';
         });
     }
 }
 
-// Attach listeners to the calendar inputs
 startDateInput.addEventListener('change', triggerDataFetchOnEvent);
 endDateInput.addEventListener('change', triggerDataFetchOnEvent);
+
+// Robust, lightweight compiler function to convert Markdown syntax and arrays into clean HTML tables
+function compileMarkdown(text) {
+    let lines = text.split('\n');
+    let insideTable = false;
+    let htmlOutput = [];
+    let tableBuffer = [];
+
+    for (let i = 0; i < lines.length; i++) {
+        let line = lines[i].trim();
+
+        // Detect if line belongs to a markdown table structure
+        if (line.startsWith('|') && line.endsWith('|')) {
+            if (!insideTable) {
+                insideTable = true;
+                tableBuffer.push('<div class="mandi-table-container"><table class="mandi-table">');
+            }
+            
+            // Skip markdown table structure boundary tags (|---|---|)
+            if (line.includes('---') || line.includes('- -')) continue;
+
+            // Extract content fragments out of pipe delimiters safely
+            let cells = line.split('|').map(c => c.trim()).filter((c, idx, arr) => idx > 0 && idx < arr.length - 1);
+            
+            tableBuffer.push('<tr>');
+            cells.forEach(cell => {
+                // Infer structural columns based on buffer size parameters
+                let isHeader = tableBuffer.length === 2; 
+                let tag = isHeader ? 'th' : 'td';
+                tableBuffer.push(`<${tag}>${cell}</${tag}>`);
+            });
+            tableBuffer.push('</tr>');
+        } else {
+            if (insideTable) {
+                insideTable = false;
+                tableBuffer.push('</table></div>');
+                htmlOutput.push(tableBuffer.join(''));
+                tableBuffer = [];
+            }
+            htmlOutput.push(line);
+        }
+    }
+    
+    if (insideTable) {
+        tableBuffer.push('</table></div>');
+        htmlOutput.push(tableBuffer.join(''));
+    }
+
+    // Process inline typographical bolding constraints and join lines back safely
+    let processedHtml = htmlOutput.join('\n');
+    processedHtml = processedHtml.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    processedHtml = processedHtml.replace(/\n/g, '<br>');
+    return processedHtml;
+}
 
 function addBotMsg(text, isTyping=false, extraClass="") {
     const msgs = document.getElementById('chat-messages');
     const div = document.createElement('div');
     div.className = `msg bot ${extraClass}`;
+    
     if(isTyping) {
         div.id = 'typing-indicator';
         div.innerHTML = `<div class="msg-avatar bot">🌱</div><div class="msg-bubble"><div class="typing-dots"><span></span><span></span><span></span></div></div>`;
     } else {
-        const formatted = text.replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>');
-        div.innerHTML = `<div class="msg-avatar bot">🌱</div><div class="msg-bubble">${formatted}</div>`;
+        const formattedPayload = compileMarkdown(text);
+        div.innerHTML = `<div class="msg-avatar bot">🌱</div><div class="msg-bubble">${formattedPayload}</div>`;
     }
+    
     msgs.appendChild(div);
     msgs.scrollTop = msgs.scrollHeight;
     return div;
@@ -214,7 +305,9 @@ async function sendMsg() {
     const endDate = document.getElementById('end-date').value;
     
     input.value = '';
-    document.getElementById('send-btn').disabled = true;
+    const sendBtn = document.getElementById('send-btn');
+    sendBtn.disabled = true;
+    
     addUserMsg(text);
     const typingDiv = addBotMsg('', true);
 
@@ -235,9 +328,9 @@ async function sendMsg() {
         addBotMsg(reply);
     } catch(err) {
         typingDiv.remove();
-        addBotMsg('Error communicating with the application server. Make sure server.py is running.');
+        addBotMsg('Communication timeout: The application cluster rejected the proxy request. Ensure server.py background threads are active.');
     }
-    document.getElementById('send-btn').disabled = false;
+    sendBtn.disabled = false;
 }
 </script>
 </body>
