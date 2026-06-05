@@ -54,7 +54,7 @@ def fetch_live_government_data(target_date_str=None):
     all_mapped_records = []
     
     # 🔥 Circuit Breaker Trackers 🔥
-    max_expected_per_day = 30000 # Indian Mandi API rarely exceeds 15k/day
+    max_expected_per_day = 30000
     records_fetched_this_session = 0
     previous_page_first_id = None
     
@@ -79,7 +79,7 @@ def fetch_live_government_data(target_date_str=None):
             
             if not raw_records: break
             
-            # 🔥 FIX 1: Duplicate Page Circuit Breaker (Safely handling lowercase keys) 🔥
+            # 🔥 Duplicate Page Circuit Breaker 🔥
             r0 = raw_records[0]
             state_val = r0.get('State') or r0.get('state') or 'unknown'
             market_val = r0.get('Market') or r0.get('market') or 'unknown'
@@ -104,13 +104,12 @@ def fetch_live_government_data(target_date_str=None):
             for row in raw_records:
                 raw_date = str(row.get("Arrival_Date") or row.get("arrival_date") or "").strip()
                 
-                # 🔥 The Government API Glitch Filter 🔥
+                # 🔥 Government API Glitch Filter 🔥
                 if target_date_str and raw_date != target_date_str:
-                    continue # Skip rogue data sent by the government API
+                    continue
                 
                 valid_records_in_this_batch += 1
                 
-                # Convert Gov DD/MM/YYYY into Postgres YYYY-MM-DD
                 pg_date = None
                 if raw_date:
                     try:
@@ -166,11 +165,9 @@ def sync_worker_logic():
 
     start_date = None
     if not latest_record:
-        # DB is empty: Fetch last 365 days
         start_date = today - timedelta(days=365)
         print("Database is empty. Initializing 365-day historical background sync...")
     else:
-        # DB has data: Find the missing gap
         latest_db_date_str = latest_record[0]["arrival_date"]
         latest_db_date = datetime.strptime(latest_db_date_str, "%Y-%m-%d").date()
         start_date = latest_db_date + timedelta(days=1)
@@ -181,7 +178,6 @@ def sync_worker_logic():
         
         print(f"Delta detected. Syncing missing days from {start_date} to {today}...")
 
-    # Build missing date strings for Gov API (DD/MM/YYYY)
     missing_dates = [
         (start_date + timedelta(days=x)).strftime("%d/%m/%Y") 
         for x in range((today - start_date).days + 1)
@@ -189,8 +185,15 @@ def sync_worker_logic():
 
     total_days = len(missing_dates)
     
+    # ✅ UPSERT helper — used by both Fast and Safe modes
+    def upsert_chunk(chunk):
+        supabase.table("mandi_prices").upsert(
+            chunk,
+            on_conflict="state,market,commodity,arrival_date,modal_price"
+        ).execute()
+
     if total_days <= 7:
-        # Fast Mode for small windows
+        # Fast Mode: parallel fetch for small windows
         new_data = []
         max_workers = min(total_days, 5)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -201,33 +204,29 @@ def sync_worker_logic():
         
         if new_data:
             try:
-                # 🔥 FIX 2: Chunking Fast Mode inserts to prevent Supabase 413 Errors 🔥
                 chunk_size = 1000
                 for i in range(0, len(new_data), chunk_size):
-                    chunk = new_data[i:i + chunk_size]
-                    supabase.table("mandi_prices").insert(chunk).execute()
-                print(f"✅ Fast Sync Complete: Inserted {len(new_data)} records.")
+                    upsert_chunk(new_data[i:i + chunk_size])
+                print(f"✅ Fast Sync Complete: Upserted {len(new_data)} records.")
             except Exception as e:
-                print(f"🚨 Fast Sync insertion failed: {e}")
+                print(f"🚨 Fast Sync upsert failed: {e}")
     else:
-        # Safe Historical Mode: Process and save day-by-day to protect memory and avoid timeouts
+        # Safe Historical Mode: sequential, day-by-day
         print(f"🛡️ Safe Historical Sync started sequentially for {total_days} days...")
         for d_str in missing_dates:
             print(f"Fetching data for: {d_str}")
             day_records = fetch_live_government_data(d_str)
             
             if day_records:
-                # Chunk into blocks of 1000 rows to satisfy Supabase thresholds
                 chunk_size = 1000
                 for i in range(0, len(day_records), chunk_size):
-                    chunk = day_records[i:i + chunk_size]
                     try:
-                        supabase.table("mandi_prices").insert(chunk).execute()
+                        upsert_chunk(day_records[i:i + chunk_size])
                     except Exception as e:
-                        print(f"🚨 Insertion failed for a chunk on date {d_str}: {e}")
-                print(f" Saved {len(day_records)} records for {d_str}")
+                        print(f"🚨 Upsert failed for a chunk on date {d_str}: {e}")
+                print(f"✅ Saved {len(day_records)} records for {d_str}")
             else:
-                print(f" No records found or published for {d_str}")
+                print(f"⚠️ No records found or published for {d_str}")
                 
         print("🎉 Complete Historical Background Sync Finished successfully!")
 
@@ -237,7 +236,6 @@ def sync_worker_logic():
 # ==========================================
 @app.get("/api/sync")
 def trigger_delta_sync(background_tasks: BackgroundTasks):
-    # Offload the heavy execution loop to a background thread instantly
     background_tasks.add_task(sync_worker_logic)
     
     return {
@@ -270,7 +268,7 @@ def chat_with_data(request: ChatRequest):
     if not target_start:
         return {"reply": "📅 Please select an arrival date or date range using the calendar controls."}
 
-    # 2. Fetch directly from Postgres (Lightning Fast!)
+    # 2. Fetch directly from Postgres
     try:
         db_response = supabase.table("mandi_prices") \
             .select("*") \
