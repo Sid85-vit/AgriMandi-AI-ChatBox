@@ -20,7 +20,7 @@ def fetch_day(date_str, max_retries=3):
                        f"?api-key={API_KEY}&format=json&limit={LIMIT}"
                        f"&offset={offset}&filters[Arrival_Date]={encoded}")
                 
-                resp = requests.get(url, timeout=30, headers={
+                resp = requests.get(url, timeout=60, headers={
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
                 })
                 raw = resp.json().get("records", [])
@@ -49,8 +49,10 @@ def fetch_day(date_str, max_retries=3):
             break  # success, exit retry loop
 
         except Exception as e:
+            wait = 15 * (attempt + 1)  # 15s, 30s, 45s
             print(f"  Attempt {attempt+1} failed for {date_str}: {e}")
-            time.sleep(10 * (attempt + 1))
+            print(f"  Waiting {wait}s before retry...")
+            time.sleep(wait)
 
     # Deduplicate within batch
     seen = set()
