@@ -1,0 +1,21 @@
+name: Mandi Weekly Sync
+on:
+  schedule:
+    - cron: '0 2 * * 1'  # Every Monday at 2 AM IST
+  workflow_dispatch:       # Manual trigger button in GitHub UI
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - run: pip install requests supabase python-dotenv
+      - run: python sync_runner.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          GOV_API_KEY: ${{ secrets.GOV_API_KEY }}
