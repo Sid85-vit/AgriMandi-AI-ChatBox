@@ -136,6 +136,8 @@ RULES:
     if not where_clause or len(where_clause) < 3:
         where_clause = "1=1"
 
+    print(f"[QUERY] where={where_clause} | order={order_by} | records_returned={len(market_data) if 'market_data' in dir() else 'pending'}")
+
     # ------------------------------------------
     # STEP 4: Security check before SQL execution
     # ------------------------------------------
