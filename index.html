@@ -164,52 +164,6 @@ window.onload = function() {
     document.getElementById('data-status').className = 'badge';
 };
 
-function triggerDataFetchOnEvent() {
-    const startVal = startDateInput.value;
-    const endVal = endDateInput.value;
-
-    if (startVal && endVal) {
-        if (new Date(endVal) < new Date(startVal)) {
-            addBotMsg("⚠️ Chronological mismatch: Your End Date cannot sit prior to your Start Date. Please adjust the parameters.");
-            document.getElementById('data-status').textContent = `Invalid Window`;
-            document.getElementById('data-status').className = 'badge warn';
-            return;
-        }
-        
-        document.getElementById('data-status').textContent = `Querying data range...`;
-        document.getElementById('data-status').className = 'badge warn';
-        
-        const typingDiv = addBotMsg('', true);
-
-        fetch("https://agrimandi-ai-chatbox.onrender.com/api/chat", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                start_date: startVal,
-                end_date: endVal,
-                message: "" // Triggers warehouse summary evaluation loop
-            })
-        })
-        .then(res => res.json())
-        .then(data => {
-            typingDiv.remove();
-            addBotMsg(data.reply || "Database subset loaded cleanly. Procedural filters applied.");
-            document.getElementById('data-status').textContent = `Warehouse Synchronized`;
-            document.getElementById('data-status').className = 'badge';
-        })
-        .catch(err => {
-            console.error(err);
-            typingDiv.remove();
-            addBotMsg("⚠️ Network validation failure: Couldn't reach the warehouse backend. Ensure your FastAPI instances are operational.");
-            document.getElementById('data-status').textContent = `Sync Disrupted`;
-            document.getElementById('data-status').className = 'badge warn';
-        });
-    }
-}
-
-startDateInput.addEventListener('change', triggerDataFetchOnEvent);
-endDateInput.addEventListener('change', triggerDataFetchOnEvent);
-
 // Robust, lightweight compiler function to convert Markdown syntax and arrays into clean HTML tables
 function compileMarkdown(text) {
     let lines = text.split('\n');
