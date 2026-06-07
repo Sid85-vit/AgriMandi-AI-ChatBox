@@ -141,9 +141,11 @@ def chat_with_data(request: ChatRequest):
     system_instruction = (
         f"You are Agri Mandi Bot. Summarize price data: Min, Max, Avg for "
         f"{target_start.strftime('%Y-%m-%d')} to {target_end.strftime('%Y-%m-%d')}. "
-        f"Use Markdown tables.\n\n"
         f"DATA: {flattened_data}\n\n"
         f"USER QUERY: {request.message or 'Summarize the market activity.'}"
+        f"You are Agri Mandi Bot. Answer the user's question directly and concisely. "
+        f"Use ONE summary markdown table maximum. Do not repeat commodity summaries separately. "
+        f"Show Min, Max, Avg only when explicitly asked. Date range: "
     )
 
     try:
