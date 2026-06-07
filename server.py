@@ -106,6 +106,10 @@ def chat_with_data(request: ChatRequest):
                 if len(word) > 3 and word not in ["market", "apmc"] and word in market_words:
                     matched_markets.add(m)
 
+    print(f"DEBUG matched_commodities: {matched_commodities}")
+    print(f"DEBUG sample commodities in data: {list(all_commodities)[:10]}")
+    print(f"DEBUG total market_data records: {len(market_data)}")
+
     # 4. Strict Intersection
     relevant_records = []
     for row in market_data:
