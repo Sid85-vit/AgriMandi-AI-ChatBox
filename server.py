@@ -40,11 +40,57 @@ class ChatRequest(BaseModel):
 # ==========================================
 # Security: Block dangerous SQL keywords
 # ==========================================
-FORBIDDEN_SQL = ["drop", "delete", "update", "insert", "truncate", "alter", "--", ";", "/*", "*/", "xp_", "exec"]
+FORBIDDEN_SQL = [
+    "drop", "delete", "update", "insert", "truncate",
+    "alter", "--", ";", "/*", "*/", "xp_", "exec"
+]
 
 def is_safe_where_clause(clause: str) -> bool:
     clause_lower = clause.lower()
     return not any(word in clause_lower for word in FORBIDDEN_SQL)
+
+
+# ==========================================
+# Commodity synonym normalization
+# Fixes cases where Groq generates ILIKE '%areca nut%'
+# but DB stores 'Arecanut(Betelnut/Supari)'
+# Add new entries here whenever a query silently returns no data
+# ==========================================
+COMMODITY_SYNONYMS = {
+    "areca nut":        "arecanut",
+    "betel nut":        "arecanut",
+    "supari":           "arecanut",
+    "peanut":           "groundnut",
+    "lady finger":      "bhindi",
+    "okra":             "bhindi",
+    "karela":           "bitter gourd",
+    "shimla mirch":     "capsicum",
+    "red chilli":       "chili red",
+    "chilly":           "chili",
+    "chilli":           "chili",
+    "green chilli":     "green chili",
+    "brinjal":          "brinjal",
+    "eggplant":         "brinjal",
+    "coriander":        "coriander",
+    "dhania":           "coriander",
+    "methi":            "fenugreek",
+    "fenugreek leaves": "methi",
+    "palak":            "spinach",
+    "gobhi":            "cauliflower",
+    "gajar":            "carrot",
+    "matar":            "peas",
+    "aloo":             "potato",
+    "pyaz":             "onion",
+    "tamatar":          "tomato",
+}
+
+def normalize_query(query: str) -> str:
+    q = query.lower()
+    # longest match first to avoid partial replacements
+    for alias in sorted(COMMODITY_SYNONYMS.keys(), key=len, reverse=True):
+        if alias in q:
+            q = q.replace(alias, COMMODITY_SYNONYMS[alias])
+    return q
 
 
 # ==========================================
@@ -83,33 +129,37 @@ def chat_with_data(request: ChatRequest):
         return {"reply": "📅 Please select an arrival date or date range using the calendar controls."}
 
     # ------------------------------------------
-    # STEP 2: Ask Groq to generate a SQL WHERE clause
+    # STEP 2: Normalize query then ask Groq to
+    #         generate a SQL WHERE clause
     # ------------------------------------------
+    normalized_message = normalize_query(request.message)
+
     schema_context = f"""You are a SQL filter generator for an Indian agricultural market price database.
 
 Table: mandi_prices
 Columns:
-  - state      (TEXT)  e.g. 'Keralam', 'Karnataka', 'Maharashtra', 'Punjab', 'Rajasthan', 'Uttar Pradesh'
-  - market     (TEXT)  e.g. 'Azadpur', 'Kanjirappally Market', 'Pune'
-  - commodity  (TEXT)  e.g. 'Tomato', 'Onion', 'Potato', 'Wheat', 'Rice', 'Apple', 'Banana', 'Garlic'
-  - arrival_date (DATE) — already filtered to {target_start} to {target_end}, do NOT add date conditions
-  - modal_price (NUMERIC) — price in INR per quintal
+  - state        (TEXT)    e.g. 'Keralam', 'Karnataka', 'Maharashtra', 'Punjab', 'Rajasthan', 'Uttar Pradesh'
+  - market       (TEXT)    e.g. 'Azadpur', 'Kanjirappally Market', 'Pune'
+  - commodity    (TEXT)    e.g. 'Tomato', 'Onion', 'Potato', 'Wheat', 'Rice', 'Apple', 'Banana', 'Garlic',
+                               'Arecanut(Betelnut/Supari)', 'Black Pepper', 'Chili Red', 'Groundnut', 'Bhindi'
+  - arrival_date (DATE)    Already filtered to {target_start} to {target_end} — do NOT add date conditions.
+  - modal_price  (NUMERIC) Price in INR per quintal.
 
 RULES:
-1. Return ONLY a SQL WHERE clause — no SELECT, no FROM, no table name, no semicolon.
-2. Use ILIKE for commodity, state, and market matching. Example: commodity ILIKE '%tomato%'
-3. If the user wants highest/max/top/expensive prices, append exactly: ||ORDER:DESC||
-4. If the user wants lowest/min/cheapest/bottom prices, append exactly: ||ORDER:ASC||
-5. If no specific commodity/state/market filter is needed, return exactly: 1=1
+1. Return ONLY a SQL WHERE clause — no SELECT, no FROM, no table name, no semicolon, no markdown.
+2. Use ILIKE for commodity, state, and market. Always use partial match: commodity ILIKE '%tomato%'
+3. If the user wants highest / max / top / expensive prices, append exactly: ||ORDER:DESC||
+4. If the user wants lowest / min / cheapest / bottom prices, append exactly: ||ORDER:ASC||
+5. If no specific commodity/state/market filter applies, return exactly: 1=1
 6. Combine multiple filters with AND. Example: commodity ILIKE '%onion%' AND state ILIKE '%maharashtra%'
-7. Do not add any explanation, markdown, or extra text. Only the WHERE clause."""
+7. No explanation, no markdown, no extra text. Only the WHERE clause (and optional ||ORDER|| tag)."""
 
     try:
         filter_response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": schema_context},
-                {"role": "user", "content": request.message}
+                {"role": "user", "content": normalized_message}
             ],
             temperature=0.0,
             max_tokens=150
@@ -121,7 +171,7 @@ RULES:
     # ------------------------------------------
     # STEP 3: Parse WHERE clause and ORDER intent
     # ------------------------------------------
-    order_by = "arrival_date DESC, modal_price DESC"  # sensible default
+    order_by = "commodity ASC, arrival_date DESC"  # default: diverse, recent-first
 
     if "||ORDER:DESC||" in raw_filter:
         where_clause = raw_filter.replace("||ORDER:DESC||", "").strip()
@@ -132,35 +182,63 @@ RULES:
     else:
         where_clause = raw_filter
 
-    # Fallback if Groq returns something unexpected
+    # Fallback if Groq returns garbage
     if not where_clause or len(where_clause) < 3:
         where_clause = "1=1"
 
-    print(f"[QUERY] where={where_clause} | order={order_by} | records_returned={len(market_data) if 'market_data' in dir() else 'pending'}")
-
     # ------------------------------------------
-    # STEP 4: Security check before SQL execution
+    # STEP 4: Security check
     # ------------------------------------------
     if not is_safe_where_clause(where_clause):
         return {"reply": "⚠️ Query could not be processed safely. Please rephrase your question."}
 
     # ------------------------------------------
-    # STEP 5: Execute raw SQL via Supabase RPC
+    # STEP 5: Build SQL query
+    # Summary queries (1=1, no specific filter) get
+    # aggregated data — not 80 raw rows of Black Pepper.
+    # Specific queries get raw rows sorted by intent.
     # ------------------------------------------
-    sql_query = f"""
-        SELECT state, market, commodity, arrival_date::text, modal_price
-        FROM mandi_prices
-        WHERE arrival_date BETWEEN '{target_start}' AND '{target_end}'
-        AND ({where_clause})
-        ORDER BY {order_by}
-        LIMIT 80
-    """
+    is_summary_query = where_clause.strip() == "1=1"
+    is_summary_intent = any(
+        word in request.message.lower()
+        for word in ["summarize", "summary", "overview", "average", "avg", "trend", "all commodities"]
+    )
 
+    if is_summary_query or is_summary_intent:
+        sql_query = f"""
+            SELECT commodity,
+                   COUNT(*) as market_count,
+                   ROUND(MIN(modal_price)::numeric, 2) as min_price,
+                   ROUND(MAX(modal_price)::numeric, 2) as max_price,
+                   ROUND(AVG(modal_price)::numeric, 2) as avg_price
+            FROM mandi_prices
+            WHERE arrival_date BETWEEN '{target_start}' AND '{target_end}'
+            {f"AND ({where_clause})" if not is_summary_query else ""}
+            GROUP BY commodity
+            ORDER BY avg_price DESC
+            LIMIT 60
+        """
+    else:
+        sql_query = f"""
+            SELECT state, market, commodity, arrival_date::text, modal_price
+            FROM mandi_prices
+            WHERE arrival_date BETWEEN '{target_start}' AND '{target_end}'
+            AND ({where_clause})
+            ORDER BY {order_by}
+            LIMIT 80
+        """
+
+    # ------------------------------------------
+    # STEP 6: Execute via Supabase RPC
+    # ------------------------------------------
     try:
         db_response = supabase.rpc("run_query", {"sql": sql_query}).execute()
         market_data = db_response.data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database Query Failed: {str(e)}")
+
+    # Log AFTER market_data is assigned
+    print(f"[QUERY] where={where_clause} | order={order_by} | records_returned={len(market_data)}")
 
     if not market_data:
         return {
@@ -172,7 +250,7 @@ RULES:
         }
 
     # ------------------------------------------
-    # STEP 6: Send exact results to Groq for answer
+    # STEP 7: Send exact results to Groq for answer
     # ------------------------------------------
     flattened_data = json.dumps(market_data, separators=(',', ':'), default=str)
 
@@ -180,10 +258,10 @@ RULES:
         f"You are Agri Mandi Bot, an assistant for Indian agricultural market prices. "
         f"Answer the user's question directly using ONLY the data provided below. "
         f"Date range: {target_start.strftime('%Y-%m-%d')} to {target_end.strftime('%Y-%m-%d')}. "
-        f"Use ONE markdown table maximum. Do not repeat commodity summaries separately. "
-        f"Show Min, Max, Avg only when explicitly asked. "
+        f"Use ONE markdown table maximum. Do not repeat the same commodity in multiple sections. "
         f"Prices are in INR per quintal. "
-        f"If the data clearly answers the question, answer it — do not say data is unavailable. "
+        f"If the data clearly answers the question, answer it directly — do not say data is unavailable. "
+        f"Do not mention data limitations or that you only have partial data. "
         f"\n\nDATA:\n{flattened_data}"
     )
 
