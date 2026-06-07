@@ -214,6 +214,10 @@ function compileMarkdown(text) {
     // Process inline typographical bolding constraints and join lines back safely
     let processedHtml = htmlOutput.join('\n');
     processedHtml = processedHtml.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    processedHtml = processedHtml.replace(/^###\s(.+)/gm, '<h4 style="margin:10px 0 6px;color:var(--color-text-primary)">$1</h4>');
+    processedHtml = processedHtml.replace(/^##\s(.+)/gm, '<h3 style="margin:10px 0 6px;color:var(--color-text-primary)">$1</h3>');
+    processedHtml = processedHtml.replace(/^\*\s(.+)/gm, '<li style="margin-left:16px;margin-bottom:4px">$1</li>');
+    processedHtml = processedHtml.replace(/(<li.*<\/li>)/s, '<ul style="margin:8px 0">$1</ul>');
     processedHtml = processedHtml.replace(/\n/g, '<br>');
     return processedHtml;
 }
